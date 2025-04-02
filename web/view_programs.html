@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <style>
+        .programs-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+            padding: 10px;
+        }
+
+        .program-card {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .program-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .program-header {
+            background: linear-gradient(135deg, #0099ff, #007acc);
+            color: white;
+            padding: 15px 20px;
+            position: relative;
+        }
+
+        .program-header h3 {
+            margin: 0;
+            font-size: 18px;
+            word-break: break-word;
+        }
+
+        .active-program {
+            border: 2px solid #00cc66;
+        }
+
+        .active-indicator {
+            background-color: #00cc66;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 12px;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            animation: pulsate 2s infinite;
+        }
+
+        @keyframes pulsate {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        .program-content {
+            padding: 15px 20px;
+            flex-grow: 1;
+        }
+
+        .info-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+
+        .info-label {
+            width: 120px;
+            font-weight: 600;
+            font-size: 14px;
+            color: #555;
+            flex-shrink: 0;
+        }
+
+        .info-value {
+            flex-grow: 1;
+            font-size: 14px;
+        }
+
+        .months-grid, .zones-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .month-tag, .zone-tag {
+            padding: 6px;
+            text-align: center;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .month-tag.active {
+            background-color: #e6f7ff;
+            color: #0099ff;
+            border: 1px solid #91d5ff;
+        }
+
+        .month-tag.inactive {
+            background-color: #f5f5f5;
+            color: #999;
+            border: 1px solid #e0e0e0;
+        }
+
+        .zone-tag {
+            background-color: #e6f7ff;
+            color: #0099ff;
+            border: 1px solid #91d5ff;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .zone-tag .duration {
+            font-size: 10px;
+            color: #777;
+            margin-top: 2px;
+        }
+
+        .program-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            padding: 15px 20px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #eee;
+        }
+
+        .action-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn {
+            padding: 8px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-start {
+            background-color: #00cc66;
+            color: white;
+        }
+
+        .btn-start:hover {
+            background-color: #00b359;
+        }
+
+        .btn-start.disabled {
+            background-color: #99e6b3;
+            cursor: not-allowed;
+        }
+
+        .btn-stop {
+            background-color: #ff3333;
+            color: white;
+        }
+
+        .btn-stop:hover {
+            background-color: #e60000;
+        }
+
+        .btn-stop.disabled {
+            background-color: #ffb3b3;
+            cursor: not-allowed;
+        }
+
+        .btn-edit {
+            background-color: #0099ff;
+            color: white;
+        }
+
+        .btn-edit:hover {
+            background-color: #007acc;
+        }
+
+        .btn-delete {
+            background-color: #ff3333;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background-color: #e60000;
+        }
+
+        .btn-icon {
+            margin-right: 5px;
+            font-size: 14px;
+        }
+
+        .auto-control {
+            display: flex;
+            padding: 15px 20px;
+            background-color: #f0f0f0;
+            border-top: 1px solid #ddd;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auto-switch {
+            display: flex;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .auto-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: none;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .auto-btn.on {
+            background-color: #00cc66;
+            color: white;
+        }
+
+        .auto-btn.on:hover {
+            background-color: #00b359;
+        }
+
+        .auto-btn.off {
+            background-color: #ff9900;
+            color: white;
+        }
+
+        .auto-btn.off:hover {
+            background-color: #e68a00;
+        }
+
+        .auto-btn.active {
+            position: relative;
+        }
+
+        .auto-btn.active::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 4px;
+            bottom: 0;
+            left: 0;
+            background-color: rgba(255, 255, 255, 0.6);
+        }
+
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 40px 20px;
+            background-color: #f9f9f9;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .empty-state h3 {
+            margin: 10px 0;
+            font-size: 18px;
+            color: #666;
+        }
+
+        .empty-state p {
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        .empty-state .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #0099ff;
+            color: white;
+            border-radius: 6px;
+            text-decoration: none;
+            margin-top: 15px;
+        }
+
+        .page-title {
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #0099ff;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .page-title .auto-status {
+            font-size: 14px;
+            font-weight: normal;
+            padding: 4px 10px;
+            border-radius: 16px;
+            display: inline-flex;
+            align-items: center;
+            margin-top: 5px;
+        }
+
+        .page-title .auto-status.on {
+            background-color: #e6fff5;
+            color: #00b359;
+            border: 1px solid #b3e6cc;
+        }
+
+        .page-title .auto-status.off {
+            background-color: #fff2e6;
+            color: #e68a00;
+            border: 1px solid #ffcd99;
+        }
+
+        .page-title .auto-status i {
+            margin-right: 5px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .page-title .auto-status.on i {
+            background-color: #00cc66;
+        }
+
+        .page-title .auto-status.off i {
+            background-color: #ff9900;
+        }
+
+        /* Loader */
+        .loading {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 40px 0;
+            color: #0099ff;
+        }
+
+        .loading:after {
+            content: " ";
+            display: block;
+            width: 40px;
+            height: 40px;
+            margin: 20px auto;
+            border-radius: 50%;
+            border: 6px solid #0099ff;
+            border-color: #0099ff transparent #0099ff transparent;
+            animation: loading 1.2s linear infinite;
+        }
+
+        @keyframes loading {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Miglioramento layout responsive */
+        @media (max-width: 767px) {
+            .programs-container {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .program-actions {
+                grid-template-columns: 1fr;
+            }
+            
+            .action-row {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .page-title {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .page-title .auto-status {
+                margin-top: 10px;
+            }
+            
+            .info-row {
+                flex-direction: column;
+            }
+            
+            .info-label {
+                width: 100%;
+                margin-bottom: 5px;
+            }
+            
+            .months-grid, .zones-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        
+        @media (min-width: 768px) and (max-width: 991px) {
+            .programs-container {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            }
+            
+            .action-row {
+                grid-template-columns: 1fr;
+                margin-bottom: 8px;
+            }
+            
+            .program-actions {
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="page-title">
+            <span>Programmi di Irrigazione</span>
+            <div id="auto-status" class="auto-status off">
+                <i></i>
+                <span>Programmi automatici disattivati</span>
+            </div>
+        </div>
+        
+        <div class="programs-container" id="programs-container">
+            <div class="loading">Caricamento programmi...</div>
+        </div>
+    </main>
+</body>
+</html>
