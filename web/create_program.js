@@ -15,23 +15,8 @@ function initializeCreateProgramPage() {
     localStorage.removeItem('editProgramId');
     sessionStorage.removeItem('editing_intent');
     window.editingProgramVar = null;
-            console.log("Modalità modifica programma, ID:", editProgramId);
-            
-            // Cambia il titolo della pagina
-            const pageTitle = document.querySelector('.page-title');
-            if (pageTitle) {
-                pageTitle.textContent = 'Modifica Programma';
-            }
-            
-            // Cambia il testo del pulsante
-            const saveButton = document.getElementById('save-button');
-            if (saveButton) {
-                saveButton.textContent = 'Aggiorna Programma';
-            }
-            
-            // Rimuovi il flag dopo l'uso
-            sessionStorage.removeItem('editing_intent');
-        }
+    
+    // Rimosso il blocco problematico con la parentesi graffe non corrispondente
     console.log("Modalità creazione nuovo programma");
 
     // Carica i dati utente per ottenere le zone

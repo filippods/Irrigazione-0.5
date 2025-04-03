@@ -1,8 +1,8 @@
 // logs.js - Script per la pagina di visualizzazione dei log
 
 // Variabili globali
-let isLoadingLogs = false;
-let autoRefreshInterval = null;
+var isLoadingLogs = false;
+var autoRefreshInterval = null;
 
 // Inizializza la pagina dei log
 function initializeLogsPage() {

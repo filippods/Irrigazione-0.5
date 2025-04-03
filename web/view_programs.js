@@ -1,9 +1,9 @@
 // view_programs.js - Script per la pagina di visualizzazione programmi
 
 // Variabili globali
-let programStatusInterval = null;
-let programsData = {};
-let zoneNameMap = {};
+var programStatusInterval = null;
+var programsData = {};
+var zoneNameMap = {};
 
 // Inizializza la pagina
 function initializeViewProgramsPage() {

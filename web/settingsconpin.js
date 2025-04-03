@@ -77,11 +77,10 @@ function loadSettingsWithData(data) {
     document.getElementById('activation-delay').value = data.activation_delay || 0;
     document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
     
-    // Mostra il valore del pin del relè di sicurezza (ma non permette di modificarlo)
+    // Imposta il valore del pin del relè di sicurezza
     const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
                         data.safety_relay.pin : 13;
     document.getElementById('safety-relay-pin').value = safetyRelayPin;
-    document.getElementById('current-safety-pin').textContent = safetyRelayPin;
     
     document.getElementById('automatic-programs-enabled').checked = data.automatic_programs_enabled || false;
     
@@ -119,7 +118,7 @@ function addChangeListeners() {
     // Advanced settings
     const advancedElements = [
         'max-active-zones', 'activation-delay', 'max-zone-duration',
-        'automatic-programs-enabled'
+        'safety-relay-pin', 'automatic-programs-enabled'
     ];
     
     advancedElements.forEach(id => {
@@ -194,9 +193,12 @@ function renderZonesSettings(zones) {
                        value="${zone.name || `Zona ${zone.id + 1}`}" maxlength="16" 
                        placeholder="Nome zona" data-zone-id="${zone.id}">
             </div>
-            <!-- Campo PIN nascosto, memorizza il valore ma non lo mostra -->
-            <input type="hidden" id="zone-pin-${zone.id}" class="zone-pin-input" 
-                   value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}" data-zone-id="${zone.id}">
+            <div class="input-group">
+                <label for="zone-pin-${zone.id}">PIN:</label>
+                <input type="number" id="zone-pin-${zone.id}" class="input-control zone-pin-input" 
+                       value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}" min="0" max="40" 
+                       placeholder="Numero pin" data-zone-id="${zone.id}">
+            </div>
             <div class="input-group">
                 <div class="input-row" style="justify-content: space-between;">
                     <label for="zone-status-${zone.id}">Visibile:</label>
@@ -207,22 +209,23 @@ function renderZonesSettings(zones) {
                     </label>
                 </div>
             </div>
-            <div class="input-group">
-                <p class="info-text">
-                    PIN: ${zone.pin !== undefined ? zone.pin : (14 + zone.id)}
-                    <span style="font-style:italic">(modificabile solo tramite file JSON)</span>
-                </p>
-            </div>
         `;
         
         zonesGrid.appendChild(zoneCard);
         
         // Aggiungi listener per le modifiche
         const nameInput = zoneCard.querySelector('.zone-name-input');
+        const pinInput = zoneCard.querySelector('.zone-pin-input');
         const statusToggle = zoneCard.querySelector('.zone-status-toggle');
         
         if (nameInput) {
             nameInput.addEventListener('input', () => {
+                settingsModified.zones = true;
+            });
+        }
+        
+        if (pinInput) {
+            pinInput.addEventListener('input', () => {
                 settingsModified.zones = true;
             });
         }
@@ -494,7 +497,7 @@ function saveZonesSettings() {
     zoneCards.forEach(card => {
         const zoneId = parseInt(card.dataset.zoneId);
         const nameInput = card.querySelector('.zone-name-input');
-        const pinInput = card.querySelector('.zone-pin-input'); // Ora nascosto, ma mantiene il valore
+        const pinInput = card.querySelector('.zone-pin-input');
         const statusToggle = card.querySelector('.zone-status-toggle');
         
         if (nameInput && pinInput && statusToggle) {
@@ -504,7 +507,7 @@ function saveZonesSettings() {
             
             // Validazione
             if (isNaN(pin) || pin < 0) {
-                showToast(`Il PIN della zona ${zoneId + 1} non è un numero valido`, 'error');
+                showToast(`Il PIN della zona ${zoneId + 1} deve essere un numero valido`, 'error');
                 if (saveButton) {
                     saveButton.classList.remove('loading');
                     saveButton.disabled = false;

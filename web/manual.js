@@ -1,11 +1,11 @@
 // manual.js - Script per la pagina di controllo manuale
 
 // Variabili globali
-let maxActiveZones = 3;
-let maxZoneDuration = 180; // durata massima in minuti
-let progressIntervals = {};
-let userSettings = {};
-let zoneStatusInterval = null;
+var maxActiveZones = 3;
+var maxZoneDuration = 180; // durata massima in minuti
+var progressIntervals = {};
+var userSettings = {};
+var zoneStatusInterval = null;
 
 // Inizializza la pagina manuale
 function initializeManualPage(userData) {

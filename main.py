@@ -7,6 +7,7 @@ from web_server import start_web_server
 from zone_manager import initialize_pins, stop_all_zones
 from program_manager import check_programs, reset_program_state
 from log_manager import log_event
+from system_monitor import start_diagnostics  # Importa il nuovo modulo di diagnostica
 import uasyncio as asyncio
 import gc
 import machine
@@ -117,6 +118,10 @@ async def main():
         # Avvia il watchdog
         watchdog_task = asyncio.create_task(watchdog_loop())
         log_event("Watchdog avviato", "INFO")
+
+        # Avvia il sistema di diagnostica
+        diagnostics_task = asyncio.create_task(start_diagnostics())
+        log_event("Sistema di diagnostica avviato", "INFO")
 
         # Mantiene il loop in esecuzione
         log_event("Sistema avviato con successo", "INFO")

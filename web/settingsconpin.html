@@ -359,14 +359,6 @@
             padding-bottom: 10px;
         }
 
-        /* Info Text */
-        .info-text {
-            font-size: 0.85em;
-            color: #666;
-            font-style: italic;
-            margin-top: 5px;
-        }
-
         /* Responsive Improvements */
         @media (max-width: 600px) {
             .zones-grid {
@@ -522,12 +514,7 @@
                     
                     <div class="input-group">
                         <label for="safety-relay-pin">Pin relè di sicurezza:</label>
-                        <p id="safety-relay-pin-display" class="info-text">
-                            Pin attualmente configurato: <span id="current-safety-pin">13</span>
-                            <br>
-                            <span style="font-style:italic">(modificabile solo tramite file JSON)</span>
-                        </p>
-                        <input type="hidden" id="safety-relay-pin" class="input-control" value="13">
+                        <input type="number" id="safety-relay-pin" class="input-control" min="0" max="40">
                     </div>
                     
                     <div class="input-group">
