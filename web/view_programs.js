@@ -264,13 +264,12 @@ function renderProgramCards(programs, state) {
                         </div>
                     </div>
                 </div>
-                <!-- New row for automatic execution toggle -->
+                <!-- Row for automatic execution toggle -->
                 <div class="info-row auto-execution-row">
-                    <div class="info-label">Attivazione automatica:</div>
                     <div class="info-value" style="display: flex; align-items: center; justify-content: space-between;">
                         <div id="auto-icon-${programId}" class="auto-status ${isAutomatic ? 'on' : 'off'}">
                             <i></i>
-                            <span>Auto: ${isAutomatic ? 'ON' : 'OFF'}</span>
+                            <span>Attivazione automatica: ${isAutomatic ? 'ON' : 'OFF'}</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="auto-switch-${programId}" 
@@ -513,7 +512,7 @@ function toggleProgramAutomatic(programId, enable) {
             const autoIcon = document.getElementById(`auto-icon-${programId}`);
             if (autoIcon) {
                 autoIcon.className = enable ? 'auto-status on' : 'auto-status off';
-                autoIcon.querySelector('span').textContent = enable ? 'Auto: ON' : 'Auto: OFF';
+                autoIcon.querySelector('span').textContent = `Attivazione automatica: ${enable ? 'ON' : 'OFF'}`;
             }
         } else {
             if (typeof showToast === 'function') {

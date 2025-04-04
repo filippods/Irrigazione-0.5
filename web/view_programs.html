@@ -25,95 +25,95 @@
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
         }
 
-		.auto-execution-row {
-    margin-top: 15px;
-    border-top: 1px dashed #eee;
-    padding-top: 15px;
-}
+        .auto-execution-row {
+            margin-top: 15px;
+            border-top: 1px dashed #eee;
+            padding-top: 15px;
+        }
 
-.auto-status {
-    display: flex;
-    align-items: center;
-    padding: 4px 10px;
-    border-radius: 16px;
-    font-size: 14px;
-    font-weight: 500;
-}
+        .auto-status {
+            display: flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 14px;
+            font-weight: 500;
+        }
 
-.auto-status.on {
-    background-color: #e6fff5;
-    color: #00b359;
-    border: 1px solid #b3e6cc;
-}
+        .auto-status.on {
+            background-color: #e6fff5;
+            color: #00b359;
+            border: 1px solid #b3e6cc;
+        }
 
-.auto-status.off {
-    background-color: #fff2e6;
-    color: #e68a00;
-    border: 1px solid #ffcd99;
-}
+        .auto-status.off {
+            background-color: #fff2e6;
+            color: #e68a00;
+            border: 1px solid #ffcd99;
+        }
 
-.auto-status i {
-    margin-right: 5px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-}
+        .auto-status i {
+            margin-right: 5px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
 
-.auto-status.on i {
-    background-color: #00cc66;
-}
+        .auto-status.on i {
+            background-color: #00cc66;
+        }
 
-.auto-status.off i {
-    background-color: #ff9900;
-}
+        .auto-status.off i {
+            background-color: #ff9900;
+        }
 
-/* Stile per migliorare il toggle switch */
-.toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 46px;
-    height: 24px;
-    margin-left: 10px;
-}
+        /* Stile per migliorare il toggle switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 46px;
+            height: 24px;
+            margin-left: 10px;
+        }
 
-.toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
 
-.toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    transition: .4s;
-    border-radius: 24px;
-}
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
 
-.toggle-slider:before {
-    position: absolute;
-    content: "";
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: .4s;
-    border-radius: 50%;
-}
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
 
-input:checked + .toggle-slider {
-    background-color: #00cc66;
-}
+        input:checked + .toggle-slider {
+            background-color: #00cc66;
+        }
 
-input:checked + .toggle-slider:before {
-    transform: translateX(22px);
-}
+        input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
 
         .program-header {
             background: linear-gradient(135deg, #0099ff, #007acc);
@@ -223,7 +223,7 @@ input:checked + .toggle-slider:before {
             gap: 10px;
             padding: 15px 20px;
             background-color: #f9f9f9;
-            border-top: an1px solid #eee;
+            border-top: 1px solid #eee;
         }
 
         .action-row {
@@ -234,71 +234,77 @@ input:checked + .toggle-slider:before {
         }
 
         .btn {
-            padding: 8px;
+            padding: 10px;
             border: none;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 500;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .btn:hover {
             transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
         }
 
         .btn-start {
-            background-color: #00cc66;
+            background-color: #4CAF50;
             color: white;
         }
 
         .btn-start:hover {
-            background-color: #00b359;
+            background-color: #43A047;
         }
 
         .btn-start.disabled {
-            background-color: #99e6b3;
+            background-color: #A5D6A7;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-stop {
-            background-color: #ff3333;
+            background-color: #F44336;
             color: white;
         }
 
         .btn-stop:hover {
-            background-color: #e60000;
+            background-color: #E53935;
         }
 
         .btn-stop.disabled {
-            background-color: #ffb3b3;
+            background-color: #FFCDD2;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-edit {
-            background-color: #0099ff;
+            background-color: #2196F3;
             color: white;
         }
 
         .btn-edit:hover {
-            background-color: #007acc;
+            background-color: #1E88E5;
         }
 
         .btn-delete {
-            background-color: #ff3333;
+            background-color: #FF5722;
             color: white;
         }
 
         .btn-delete:hover {
-            background-color: #e60000;
+            background-color: #E64A19;
         }
 
         .btn-icon {
-            margin-right: 5px;
-            font-size: 14px;
+            margin-right: 8px;
+            font-size: 16px;
         }
 
         .auto-control {

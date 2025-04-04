@@ -349,15 +349,6 @@
             box-shadow: 0 4px 8px rgba(255, 153, 0, 0.3);
         }
         
-        .reset-settings-btn {
-            background-color: #ff5722;
-        }
-        
-        .reset-settings-btn:hover {
-            background-color: #e64a19;
-            box-shadow: 0 4px 8px rgba(255, 87, 34, 0.3);
-        }
-        
         .factory-reset-btn {
             background-color: #d32f2f;
         }
@@ -454,6 +445,61 @@
             color: #666;
             font-style: italic;
             margin-top: 5px;
+        }
+        
+        /* Pin display style */
+        .pin-display {
+            background-color: #f0f0f0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        /* Confirmation Dialog */
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .overlay.active {
+            display: flex;
+        }
+
+        .confirm-dialog {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            width: 90%;
+            max-width: 400px;
+        }
+
+        .confirm-dialog h3 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            color: #d32f2f;
+        }
+
+        .confirm-dialog p {
+            margin-bottom: 20px;
+            color: #555;
+        }
+
+        .confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
         }
 
         /* Responsive Improvements */
@@ -621,7 +667,8 @@
                     
                     <div class="input-group">
                         <label for="safety-relay-pin">Pin relè di sicurezza:</label>
-                        <input type="number" id="safety-relay-pin" class="input-control" value="13">
+                        <div class="pin-display" id="safety-relay-pin-display">13</div>
+                        <input type="hidden" id="safety-relay-pin" value="13">
                     </div>
                     
                     <button id="save-advanced-button" class="button primary" onclick="saveAdvancedSettings()">
@@ -645,10 +692,6 @@
                             Riavvia Dispositivo
                         </button>
                         
-                        <button id="reset-settings-button" class="system-action-btn reset-settings-btn" onclick="confirmResetSettings()">
-                            Reset Impostazioni
-                        </button>
-                        
                         <button id="factory-reset-button" class="system-action-btn factory-reset-btn" onclick="confirmFactoryReset()">
                             Reset Dati di Fabbrica
                         </button>
@@ -657,5 +700,41 @@
             </div>
         </div>
     </main>
+    
+    <!-- Factory Reset Confirmation Dialog -->
+    <div id="factory-reset-overlay" class="overlay">
+        <div class="confirm-dialog">
+            <h3>Attenzione: Reset Dati di Fabbrica</h3>
+            <p>Questa operazione cancellerà <strong>definitivamente</strong> tutti i programmi e resetterà tutte le impostazioni. Sei assolutamente sicuro di voler procedere?</p>
+            <div class="confirm-actions">
+                <button class="button secondary" onclick="closeFactoryResetDialog()">Annulla</button>
+                <button class="button danger" onclick="confirmFactoryResetFinal()">Conferma Reset</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Second Factory Reset Confirmation Dialog -->
+    <div id="factory-reset-final-overlay" class="overlay">
+        <div class="confirm-dialog">
+            <h3>Conferma Definitiva</h3>
+            <p>Tutti i dati verranno persi. Questa operazione non può essere annullata. Confermi di voler procedere?</p>
+            <div class="confirm-actions">
+                <button class="button secondary" onclick="closeFactoryResetFinalDialog()">Annulla</button>
+                <button class="button danger" onclick="executeFactoryReset()">Procedi con il Reset</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Restart Confirmation Dialog -->
+    <div id="restart-overlay" class="overlay">
+        <div class="confirm-dialog">
+            <h3>Conferma Riavvio</h3>
+            <p>Sei sicuro di voler riavviare il sistema? Tutte le connessioni attive verranno chiuse.</p>
+            <div class="confirm-actions">
+                <button class="button secondary" onclick="closeRestartDialog()">Annulla</button>
+                <button class="button warning" onclick="restartSystem()">Riavvia</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

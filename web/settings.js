@@ -80,10 +80,11 @@ function loadSettingsWithData(data) {
     document.getElementById('activation-delay').value = data.activation_delay || 0;
     document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
     
-    // Imposta il valore del pin del relè di sicurezza
+    // Imposta il valore del pin del relè di sicurezza (solo visualizzazione)
     const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
                         data.safety_relay.pin : 13;
     document.getElementById('safety-relay-pin').value = safetyRelayPin;
+    document.getElementById('safety-relay-pin-display').textContent = safetyRelayPin;
     
     // Resetta i flag delle modifiche
     settingsModified = {
@@ -118,8 +119,7 @@ function addChangeListeners() {
     
     // Advanced settings
     const advancedElements = [
-        'max-active-zones', 'activation-delay', 'max-zone-duration',
-        'safety-relay-pin'
+        'max-active-zones', 'activation-delay', 'max-zone-duration'
     ];
     
     advancedElements.forEach(id => {
@@ -194,12 +194,11 @@ function renderZonesSettings(zones) {
                        value="${zone.name || `Zona ${zone.id + 1}`}" maxlength="16" 
                        placeholder="Nome zona" data-zone-id="${zone.id}">
             </div>
-            <!-- Campo PIN per la zona -->
+            <!-- Visualizzazione del PIN (non modificabile) -->
             <div class="input-group">
                 <label for="zone-pin-${zone.id}">PIN:</label>
-                <input type="number" id="zone-pin-${zone.id}" class="input-control zone-pin-input" 
-                       value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}" min="0" max="40" 
-                       placeholder="Numero pin" data-zone-id="${zone.id}">
+                <div class="pin-display">${zone.pin !== undefined ? zone.pin : (14 + zone.id)}</div>
+                <input type="hidden" id="zone-pin-${zone.id}" value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}">
             </div>
             <div class="input-group">
                 <div class="input-row" style="justify-content: space-between;">
@@ -217,17 +216,10 @@ function renderZonesSettings(zones) {
         
         // Aggiungi listener per le modifiche
         const nameInput = zoneCard.querySelector('.zone-name-input');
-        const pinInput = zoneCard.querySelector('.zone-pin-input');
         const statusToggle = zoneCard.querySelector('.zone-status-toggle');
         
         if (nameInput) {
             nameInput.addEventListener('input', () => {
-                settingsModified.zones = true;
-            });
-        }
-        
-        if (pinInput) {
-            pinInput.addEventListener('input', () => {
                 settingsModified.zones = true;
             });
         }
@@ -469,23 +461,13 @@ function saveZonesSettings() {
     zoneCards.forEach(card => {
         const zoneId = parseInt(card.dataset.zoneId);
         const nameInput = card.querySelector('.zone-name-input');
-        const pinInput = card.querySelector('.zone-pin-input');
+        const pinInput = document.getElementById(`zone-pin-${zoneId}`);
         const statusToggle = card.querySelector('.zone-status-toggle');
         
         if (nameInput && pinInput && statusToggle) {
             const name = nameInput.value.trim();
             const pin = parseInt(pinInput.value);
             const status = statusToggle.checked ? 'show' : 'hide';
-            
-            // Validazione
-            if (isNaN(pin) || pin < 0) {
-                showToast(`Il PIN della zona ${zoneId + 1} deve essere un numero valido`, 'error');
-                if (saveButton) {
-                    saveButton.classList.remove('loading');
-                    saveButton.disabled = false;
-                }
-                return;
-            }
             
             zones.push({
                 id: zoneId,
@@ -568,15 +550,6 @@ function saveAdvancedSettings() {
     
     if (isNaN(maxZoneDuration) || maxZoneDuration < 1) {
         showToast('La durata massima deve essere almeno 1 minuto', 'error');
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
-        }
-        return;
-    }
-    
-    if (isNaN(safetyRelayPin) || safetyRelayPin < 0) {
-        showToast('Il pin del relè di sicurezza deve essere un numero valido', 'error');
         if (saveButton) {
             saveButton.classList.remove('loading');
             saveButton.disabled = false;
@@ -742,20 +715,53 @@ function cleanupSettingsPage() {
 
 // Funzioni di conferma per le azioni di sistema
 function confirmRestartSystem() {
-    if (confirm('Sei sicuro di voler riavviare il sistema? Tutte le connessioni attive verranno chiuse.')) {
-        restartSystem();
+    // Apri la finestra di conferma per il riavvio
+    const overlay = document.getElementById('restart-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
     }
 }
 
-function confirmResetSettings() {
-    if (confirm('Sei sicuro di voler resettare tutte le impostazioni? Questa operazione non può essere annullata.')) {
-        resetSettings();
+function closeRestartDialog() {
+    // Chiudi la finestra di conferma per il riavvio
+    const overlay = document.getElementById('restart-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
     }
 }
 
 function confirmFactoryReset() {
-    if (confirm('ATTENZIONE: Questa operazione cancellerà tutti i programmi e resetterà tutte le impostazioni. Continuare?')) {
-        factoryReset();
+    // Apri la prima finestra di conferma per il reset
+    const overlay = document.getElementById('factory-reset-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
+}
+
+function closeFactoryResetDialog() {
+    // Chiudi la prima finestra di conferma per il reset
+    const overlay = document.getElementById('factory-reset-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+    }
+}
+
+function confirmFactoryResetFinal() {
+    // Chiudi la prima finestra di conferma
+    closeFactoryResetDialog();
+    
+    // Apri la seconda finestra di conferma
+    const overlay = document.getElementById('factory-reset-final-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
+}
+
+function closeFactoryResetFinalDialog() {
+    // Chiudi la seconda finestra di conferma per il reset
+    const overlay = document.getElementById('factory-reset-final-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
     }
 }
 
@@ -766,6 +772,9 @@ function restartSystem() {
         restartButton.classList.add('loading');
         restartButton.disabled = true;
     }
+    
+    // Chiudi la finestra di conferma
+    closeRestartDialog();
     
     fetch('/restart_system', {
         method: 'POST'
@@ -806,51 +815,15 @@ function restartSystem() {
     });
 }
 
-function resetSettings() {
-    const resetButton = document.getElementById('reset-settings-button');
-    if (resetButton) {
-        resetButton.classList.add('loading');
-        resetButton.disabled = true;
-    }
-    
-    fetch('/reset_settings', {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast('Impostazioni resettate con successo. La pagina si ricaricherà.', 'success');
-            
-            // Ricarica la pagina dopo 2 secondi
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
-        } else {
-            showToast(`Errore: ${data.error || 'Reset fallito'}`, 'error');
-            
-            if (resetButton) {
-                resetButton.classList.remove('loading');
-                resetButton.disabled = false;
-            }
-        }
-    })
-    .catch(error => {
-        console.error('Errore:', error);
-        showToast('Errore di rete durante il reset', 'error');
-        
-        if (resetButton) {
-            resetButton.classList.remove('loading');
-            resetButton.disabled = false;
-        }
-    });
-}
-
-function factoryReset() {
+function executeFactoryReset() {
     const factoryResetButton = document.getElementById('factory-reset-button');
     if (factoryResetButton) {
         factoryResetButton.classList.add('loading');
         factoryResetButton.disabled = true;
     }
+    
+    // Chiudi la finestra di conferma
+    closeFactoryResetFinalDialog();
     
     fetch('/reset_factory_data', {
         method: 'POST'
