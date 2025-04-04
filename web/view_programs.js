@@ -159,9 +159,6 @@ function loadUserSettingsAndPrograms() {
             });
         }
         
-        // Aggiorna lo stato dei programmi automatici
-        updateAutoProgramsStatus(settings.automatic_programs_enabled || false);
-        
         // Salva i programmi per riferimento futuro
         programsData = programs || {};
         
@@ -185,20 +182,6 @@ function loadUserSettingsAndPrograms() {
             `;
         }
     });
-}
-
-// Aggiorna lo stato dei programmi automatici nella UI
-function updateAutoProgramsStatus(enabled) {
-    const statusEl = document.getElementById('auto-status');
-    if (statusEl) {
-        if (enabled) {
-            statusEl.className = 'auto-status on';
-            statusEl.querySelector('span').textContent = 'Programmi automatici attivi';
-        } else {
-            statusEl.className = 'auto-status off';
-            statusEl.querySelector('span').textContent = 'Programmi automatici disattivati';
-        }
-    }
 }
 
 function renderProgramCards(programs, state) {
@@ -283,7 +266,7 @@ function renderProgramCards(programs, state) {
                 </div>
                 <!-- New row for automatic execution toggle -->
                 <div class="info-row auto-execution-row">
-                    <div class="info-label">Automazione:</div>
+                    <div class="info-label">Attivazione automatica:</div>
                     <div class="info-value" style="display: flex; align-items: center; justify-content: space-between;">
                         <div id="auto-icon-${programId}" class="auto-status ${isAutomatic ? 'on' : 'off'}">
                             <i></i>
@@ -326,34 +309,6 @@ function renderProgramCards(programs, state) {
         
         container.appendChild(programCard);
     });
-    
-    // Aggiungi controllo programmi automatici globale
-    const autoControlContainer = document.createElement('div');
-    autoControlContainer.className = 'auto-control';
-    autoControlContainer.style.gridColumn = '1/-1';
-    autoControlContainer.style.margin = '20px 0';
-    autoControlContainer.style.padding = '15px';
-    autoControlContainer.style.backgroundColor = '#f9f9f9';
-    autoControlContainer.style.borderRadius = '12px';
-    autoControlContainer.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.05)';
-    autoControlContainer.style.textAlign = 'center';
-    
-    // Verifica se i programmi automatici sono abilitati dalle impostazioni utente
-    const autoEnabled = window.userData && window.userData.automatic_programs_enabled;
-    
-    autoControlContainer.innerHTML = `
-        <h3 style="margin-bottom:15px">Controllo Globale Programmi Automatici</h3>
-        <div class="auto-switch" style="display:inline-flex;border-radius:24px;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.1)">
-            <button class="auto-btn on ${autoEnabled ? 'active' : ''}" onclick="toggleAutomaticPrograms(true)">
-                Automatici ON
-            </button>
-            <button class="auto-btn off ${!autoEnabled ? 'active' : ''}" onclick="toggleAutomaticPrograms(false)">
-                Automatici OFF
-            </button>
-        </div>
-    `;
-    
-    container.appendChild(autoControlContainer);
 }
 
 // Formatta la cadenza per la visualizzazione
@@ -493,8 +448,6 @@ function stopProgram() {
     });
 }
 
-// Funzione editProgram in view_programs.js
-
 function editProgram(programId) {
     // Salva l'ID del programma in localStorage per recuperarlo nella pagina di modifica
     localStorage.setItem('editProgramId', programId);
@@ -535,7 +488,8 @@ function deleteProgram(programId) {
         }
     });
 }
-// Add this function to toggle the automatic status of a program
+
+// Function to toggle the automatic status of a program
 function toggleProgramAutomatic(programId, enable) {
     fetch('/toggle_program_automatic', {
         method: 'POST',

@@ -49,8 +49,11 @@ function loadSettingsWithData(data) {
     window.userData = data || {};
     
     // Impostazioni WiFi
-    document.getElementById('client-enabled').checked = data.client_enabled || false;
-    toggleWifiClientSettings(data.client_enabled || false);
+    const clientEnabled = data.client_enabled || false;
+    document.getElementById('client-enabled').checked = clientEnabled;
+    
+    // Inizializza il selettore della modalità WiFi
+    selectWifiMode(clientEnabled ? 'client' : 'ap');
     
     if (data.wifi) {
         const wifiSsid = data.wifi.ssid || '';
@@ -77,13 +80,10 @@ function loadSettingsWithData(data) {
     document.getElementById('activation-delay').value = data.activation_delay || 0;
     document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
     
-    // Mostra il valore del pin del relè di sicurezza (ma non permette di modificarlo)
+    // Imposta il valore del pin del relè di sicurezza
     const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
                         data.safety_relay.pin : 13;
     document.getElementById('safety-relay-pin').value = safetyRelayPin;
-    document.getElementById('current-safety-pin').textContent = safetyRelayPin;
-    
-    document.getElementById('automatic-programs-enabled').checked = data.automatic_programs_enabled || false;
     
     // Resetta i flag delle modifiche
     settingsModified = {
@@ -119,7 +119,7 @@ function addChangeListeners() {
     // Advanced settings
     const advancedElements = [
         'max-active-zones', 'activation-delay', 'max-zone-duration',
-        'automatic-programs-enabled'
+        'safety-relay-pin'
     ];
     
     advancedElements.forEach(id => {
@@ -194,9 +194,13 @@ function renderZonesSettings(zones) {
                        value="${zone.name || `Zona ${zone.id + 1}`}" maxlength="16" 
                        placeholder="Nome zona" data-zone-id="${zone.id}">
             </div>
-            <!-- Campo PIN nascosto, memorizza il valore ma non lo mostra -->
-            <input type="hidden" id="zone-pin-${zone.id}" class="zone-pin-input" 
-                   value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}" data-zone-id="${zone.id}">
+            <!-- Campo PIN per la zona -->
+            <div class="input-group">
+                <label for="zone-pin-${zone.id}">PIN:</label>
+                <input type="number" id="zone-pin-${zone.id}" class="input-control zone-pin-input" 
+                       value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}" min="0" max="40" 
+                       placeholder="Numero pin" data-zone-id="${zone.id}">
+            </div>
             <div class="input-group">
                 <div class="input-row" style="justify-content: space-between;">
                     <label for="zone-status-${zone.id}">Visibile:</label>
@@ -207,22 +211,23 @@ function renderZonesSettings(zones) {
                     </label>
                 </div>
             </div>
-            <div class="input-group">
-                <p class="info-text">
-                    PIN: ${zone.pin !== undefined ? zone.pin : (14 + zone.id)}
-                    <span style="font-style:italic">(modificabile solo tramite file JSON)</span>
-                </p>
-            </div>
         `;
         
         zonesGrid.appendChild(zoneCard);
         
         // Aggiungi listener per le modifiche
         const nameInput = zoneCard.querySelector('.zone-name-input');
+        const pinInput = zoneCard.querySelector('.zone-pin-input');
         const statusToggle = zoneCard.querySelector('.zone-status-toggle');
         
         if (nameInput) {
             nameInput.addEventListener('input', () => {
+                settingsModified.zones = true;
+            });
+        }
+        
+        if (pinInput) {
+            pinInput.addEventListener('input', () => {
                 settingsModified.zones = true;
             });
         }
@@ -235,13 +240,36 @@ function renderZonesSettings(zones) {
     });
 }
 
-
-// Mostra/nascondi le impostazioni WiFi client
-function toggleWifiClientSettings(enable) {
-    const wifiClientSettings = document.getElementById('wifi-client-settings');
-    if (wifiClientSettings) {
-        wifiClientSettings.style.display = enable ? 'block' : 'none';
+// Function to select WiFi mode
+function selectWifiMode(mode) {
+    console.log("Selezione modalità WiFi:", mode);
+    
+    // Update the mode descriptions
+    const clientDesc = document.getElementById('client-mode-desc');
+    const apDesc = document.getElementById('ap-mode-desc');
+    
+    if (clientDesc && apDesc) {
+        clientDesc.classList.toggle('active', mode === 'client');
+        apDesc.classList.toggle('active', mode === 'ap');
     }
+    
+    // Show/hide appropriate settings sections
+    const clientSettings = document.getElementById('wifi-client-settings');
+    const apSettings = document.getElementById('wifi-ap-settings');
+    
+    if (clientSettings && apSettings) {
+        clientSettings.style.display = (mode === 'client') ? 'block' : 'none';
+        apSettings.style.display = (mode === 'ap') ? 'block' : 'none';
+    }
+    
+    // Update the hidden client_enabled input (for backward compatibility)
+    const clientEnabledInput = document.getElementById('client-enabled');
+    if (clientEnabledInput) {
+        clientEnabledInput.checked = (mode === 'client');
+    }
+    
+    // Mark settings as modified
+    settingsModified.wifi = true;
 }
 
 // Funzioni per la connessione WiFi
@@ -335,62 +363,6 @@ function displayWifiNetworks(networks) {
     networksContainer.style.display = 'block';
 }
 
-// Connetti alla rete WiFi selezionata
-function connectToWifi() {
-    const ssid = document.getElementById('wifi-list').value;
-    const password = document.getElementById('wifi-password').value;
-    
-    if (!ssid) {
-        showToast('Seleziona una rete WiFi', 'warning');
-        return;
-    }
-    
-    if (!password) {
-        showToast('Inserisci la password', 'warning');
-        return;
-    }
-    
-    const connectButton = document.getElementById('connect-wifi-button');
-    if (connectButton) {
-        connectButton.classList.add('loading');
-        connectButton.disabled = true;
-    }
-    
-    fetch('/connect_wifi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ssid, password })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast(`Connesso a ${ssid} con successo`, 'success');
-            
-            // Aggiorna le impostazioni
-            window.userData.client_enabled = true;
-            window.userData.wifi = { ssid, password };
-            
-            // Aggiorna l'interfaccia
-            document.getElementById('client-enabled').checked = true;
-            
-            // Aggiorna lo stato della connessione
-            setTimeout(fetchConnectionStatus, 2000);
-        } else {
-            showToast(`Errore: ${data.error || 'Connessione fallita'}`, 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Errore:', error);
-        showToast('Errore di rete durante la connessione', 'error');
-    })
-    .finally(() => {
-        if (connectButton) {
-            connectButton.classList.remove('loading');
-            connectButton.disabled = false;
-        }
-    });
-}
-
 // Salva le impostazioni WiFi
 function saveWifiSettings() {
     if (!settingsModified.wifi) {
@@ -404,8 +376,11 @@ function saveWifiSettings() {
         saveButton.disabled = true;
     }
     
+    // Ottieni la modalità WiFi selezionata
+    const isClientMode = document.getElementById('client-enabled').checked;
+    
     // Raccogli i dati dai campi
-    const clientEnabled = document.getElementById('client-enabled').checked;
+    const clientEnabled = isClientMode; // Usa la modalità selezionata
     const wifiSsid = document.getElementById('wifi-list').value;
     const wifiPassword = document.getElementById('wifi-password').value;
     const apSsid = document.getElementById('ap-ssid').value;
@@ -494,7 +469,7 @@ function saveZonesSettings() {
     zoneCards.forEach(card => {
         const zoneId = parseInt(card.dataset.zoneId);
         const nameInput = card.querySelector('.zone-name-input');
-        const pinInput = card.querySelector('.zone-pin-input'); // Ora nascosto, ma mantiene il valore
+        const pinInput = card.querySelector('.zone-pin-input');
         const statusToggle = card.querySelector('.zone-status-toggle');
         
         if (nameInput && pinInput && statusToggle) {
@@ -504,7 +479,7 @@ function saveZonesSettings() {
             
             // Validazione
             if (isNaN(pin) || pin < 0) {
-                showToast(`Il PIN della zona ${zoneId + 1} non è un numero valido`, 'error');
+                showToast(`Il PIN della zona ${zoneId + 1} deve essere un numero valido`, 'error');
                 if (saveButton) {
                     saveButton.classList.remove('loading');
                     saveButton.disabled = false;
@@ -571,7 +546,6 @@ function saveAdvancedSettings() {
     const activationDelay = parseInt(document.getElementById('activation-delay').value);
     const maxZoneDuration = parseInt(document.getElementById('max-zone-duration').value);
     const safetyRelayPin = parseInt(document.getElementById('safety-relay-pin').value);
-    const automaticProgramsEnabled = document.getElementById('automatic-programs-enabled').checked;
     
     // Validazione
     if (isNaN(maxActiveZones) || maxActiveZones < 1 || maxActiveZones > 8) {
@@ -618,7 +592,7 @@ function saveAdvancedSettings() {
         safety_relay: {
             pin: safetyRelayPin
         },
-        automatic_programs_enabled: automaticProgramsEnabled
+        automatic_programs_enabled: true // Mantenuto per compatibilità, ma non mostrato nell'UI
     };
     
     // Invia la richiesta
@@ -906,181 +880,6 @@ function factoryReset() {
         if (factoryResetButton) {
             factoryResetButton.classList.remove('loading');
             factoryResetButton.disabled = false;
-        }
-    });
-}
-
-// Function to select WiFi mode
-function selectWifiMode(mode) {
-    console.log("Selezione modalità WiFi:", mode);
-    
-    // Update radio buttons
-    document.getElementById('wifi-mode-client').checked = (mode === 'client');
-    document.getElementById('wifi-mode-ap').checked = (mode === 'ap');
-    
-    // Show/hide appropriate settings sections
-    const clientSettings = document.getElementById('wifi-client-settings');
-    const apSettings = document.getElementById('wifi-ap-settings');
-    
-    if (clientSettings && apSettings) {
-        clientSettings.style.display = (mode === 'client') ? 'block' : 'none';
-        apSettings.style.display = (mode === 'ap') ? 'block' : 'none';
-    }
-    
-    // Highlight the active mode description
-    const clientDesc = document.getElementById('client-mode-desc');
-    const apDesc = document.getElementById('ap-mode-desc');
-    
-    if (clientDesc && apDesc) {
-        clientDesc.classList.toggle('active', mode === 'client');
-        apDesc.classList.toggle('active', mode === 'ap');
-    }
-    
-    // Update the hidden client_enabled input (for backward compatibility)
-    const clientEnabledInput = document.getElementById('client-enabled');
-    if (clientEnabledInput) {
-        clientEnabledInput.checked = (mode === 'client');
-    }
-    
-    // Mark settings as modified
-    settingsModified.wifi = true;
-}
-
-// Modificare la funzione loadSettingsWithData per inizializzare il selettore della modalità WiFi
-function loadSettingsWithData(data) {
-    console.log("Caricamento impostazioni con dati:", data);
-    window.userData = data || {};
-    
-    // Impostazioni WiFi
-    const clientEnabled = data.client_enabled || false;
-    document.getElementById('client-enabled').checked = clientEnabled;
-    
-    // Inizializza il selettore della modalità WiFi
-    selectWifiMode(clientEnabled ? 'client' : 'ap');
-    
-    if (data.wifi) {
-        const wifiSsid = data.wifi.ssid || '';
-        // Aggiungi l'opzione del SSID corrente alla lista WiFi se non vuota
-        if (wifiSsid) {
-            const wifiListSelect = document.getElementById('wifi-list');
-            if (wifiListSelect) {
-                wifiListSelect.innerHTML = `<option value="${wifiSsid}">${wifiSsid}</option>`;
-            }
-        }
-        document.getElementById('wifi-password').value = data.wifi.password || '';
-    }
-    
-    if (data.ap) {
-        document.getElementById('ap-ssid').value = data.ap.ssid || 'IrrigationSystem';
-        document.getElementById('ap-password').value = data.ap.password || '12345678';
-    }
-    
-    // Impostazioni zone
-    renderZonesSettings(data.zones || []);
-    
-    // Impostazioni avanzate
-    document.getElementById('max-active-zones').value = data.max_active_zones || 3;
-    document.getElementById('activation-delay').value = data.activation_delay || 0;
-    document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
-    
-    // Mostra il valore del pin del relè di sicurezza (ma non permette di modificarlo)
-    const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
-                        data.safety_relay.pin : 13;
-    document.getElementById('safety-relay-pin').value = safetyRelayPin;
-    document.getElementById('current-safety-pin').textContent = safetyRelayPin;
-    
-    document.getElementById('automatic-programs-enabled').checked = data.automatic_programs_enabled || false;
-    
-    // Resetta i flag delle modifiche
-    settingsModified = {
-        wifi: false,
-        zones: false,
-        advanced: false
-    };
-}
-
-// Aggiorna la funzione saveWifiSettings per utilizzare la modalità selezionata
-function saveWifiSettings() {
-    if (!settingsModified.wifi) {
-        showToast('Nessuna modifica da salvare', 'info');
-        return;
-    }
-    
-    const saveButton = document.getElementById('save-wifi-button');
-    if (saveButton) {
-        saveButton.classList.add('loading');
-        saveButton.disabled = true;
-    }
-    
-    // Ottieni la modalità WiFi selezionata
-    const isClientMode = document.getElementById('wifi-mode-client').checked;
-    
-    // Raccogli i dati dai campi
-    const clientEnabled = isClientMode; // Usa la modalità selezionata
-    const wifiSsid = document.getElementById('wifi-list').value;
-    const wifiPassword = document.getElementById('wifi-password').value;
-    const apSsid = document.getElementById('ap-ssid').value;
-    const apPassword = document.getElementById('ap-password').value;
-    
-    // Validazione
-    if (!apSsid) {
-        showToast('Il nome (SSID) dell\'access point non può essere vuoto', 'error');
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
-        }
-        return;
-    }
-    
-    if (apPassword && apPassword.length < 8) {
-        showToast('La password dell\'access point deve essere di almeno 8 caratteri', 'error');
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
-        }
-        return;
-    }
-    
-    // Se client è abilitato, verifica che ci siano SSID e password
-    if (clientEnabled && (!wifiSsid || !wifiPassword)) {
-        showToast('Inserisci SSID e password per la modalità client', 'error');
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
-        }
-        return;
-    }
-    
-    // Prepara i dati da inviare
-    const wifiSettings = {
-        client_enabled: clientEnabled,
-        wifi: {
-            ssid: wifiSsid,
-            password: wifiPassword
-        },
-        ap: {
-            ssid: apSsid,
-            password: apPassword
-        }
-    };
-    
-    // Invia la richiesta
-    saveSettings(wifiSettings, () => {
-        settingsModified.wifi = false;
-        
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
-        }
-        
-        showToast('Impostazioni WiFi salvate con successo', 'success');
-        
-        // Aggiorna lo stato della connessione
-        setTimeout(fetchConnectionStatus, 2000);
-    }, () => {
-        if (saveButton) {
-            saveButton.classList.remove('loading');
-            saveButton.disabled = false;
         }
     });
 }
