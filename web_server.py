@@ -457,6 +457,40 @@ def update_program_route(request):
         print(f"Errore durante l'aggiornamento del programma: {e}")
         return json_response({'success': False, 'error': str(e)}, 500)
 
+@app.route('/toggle_program_automatic', methods=['POST'])
+def toggle_program_automatic(request):
+    """API per abilitare/disabilitare l'automazione di un singolo programma."""
+    try:
+        data = request.json
+        if data is None:
+            data = ujson.loads(request.body.decode('utf-8'))
+            
+        program_id = data.get('program_id')
+        enable = data.get('enable', True)
+        
+        if not program_id:
+            return json_response({'success': False, 'error': 'ID programma mancante'}, 400)
+            
+        # Carica i programmi
+        programs = load_programs()
+        
+        if program_id not in programs:
+            return json_response({'success': False, 'error': 'Programma non trovato'}, 404)
+            
+        # Aggiorna lo stato automatico del programma
+        programs[program_id]['automatic_enabled'] = enable
+        
+        # Salva i programmi aggiornati
+        if save_programs(programs):
+            log_event(f"Automazione del programma {program_id} {'abilitata' if enable else 'disabilitata'}", "INFO")
+            return json_response({'success': True})
+        else:
+            return json_response({'success': False, 'error': 'Errore durante il salvataggio'}, 500)
+    except Exception as e:
+        log_event(f"Errore durante la modifica dello stato automatico del programma: {e}", "ERROR")
+        print(f"Errore durante la modifica dello stato automatico del programma: {e}")
+        return json_response({'success': False, 'error': str(e)}, 500)
+        
 @app.route('/delete_program', methods=['POST'])
 def delete_program_route(request):
     """API per eliminare un programma."""

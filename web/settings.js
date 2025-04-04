@@ -910,6 +910,181 @@ function factoryReset() {
     });
 }
 
+// Function to select WiFi mode
+function selectWifiMode(mode) {
+    console.log("Selezione modalità WiFi:", mode);
+    
+    // Update radio buttons
+    document.getElementById('wifi-mode-client').checked = (mode === 'client');
+    document.getElementById('wifi-mode-ap').checked = (mode === 'ap');
+    
+    // Show/hide appropriate settings sections
+    const clientSettings = document.getElementById('wifi-client-settings');
+    const apSettings = document.getElementById('wifi-ap-settings');
+    
+    if (clientSettings && apSettings) {
+        clientSettings.style.display = (mode === 'client') ? 'block' : 'none';
+        apSettings.style.display = (mode === 'ap') ? 'block' : 'none';
+    }
+    
+    // Highlight the active mode description
+    const clientDesc = document.getElementById('client-mode-desc');
+    const apDesc = document.getElementById('ap-mode-desc');
+    
+    if (clientDesc && apDesc) {
+        clientDesc.classList.toggle('active', mode === 'client');
+        apDesc.classList.toggle('active', mode === 'ap');
+    }
+    
+    // Update the hidden client_enabled input (for backward compatibility)
+    const clientEnabledInput = document.getElementById('client-enabled');
+    if (clientEnabledInput) {
+        clientEnabledInput.checked = (mode === 'client');
+    }
+    
+    // Mark settings as modified
+    settingsModified.wifi = true;
+}
+
+// Modificare la funzione loadSettingsWithData per inizializzare il selettore della modalità WiFi
+function loadSettingsWithData(data) {
+    console.log("Caricamento impostazioni con dati:", data);
+    window.userData = data || {};
+    
+    // Impostazioni WiFi
+    const clientEnabled = data.client_enabled || false;
+    document.getElementById('client-enabled').checked = clientEnabled;
+    
+    // Inizializza il selettore della modalità WiFi
+    selectWifiMode(clientEnabled ? 'client' : 'ap');
+    
+    if (data.wifi) {
+        const wifiSsid = data.wifi.ssid || '';
+        // Aggiungi l'opzione del SSID corrente alla lista WiFi se non vuota
+        if (wifiSsid) {
+            const wifiListSelect = document.getElementById('wifi-list');
+            if (wifiListSelect) {
+                wifiListSelect.innerHTML = `<option value="${wifiSsid}">${wifiSsid}</option>`;
+            }
+        }
+        document.getElementById('wifi-password').value = data.wifi.password || '';
+    }
+    
+    if (data.ap) {
+        document.getElementById('ap-ssid').value = data.ap.ssid || 'IrrigationSystem';
+        document.getElementById('ap-password').value = data.ap.password || '12345678';
+    }
+    
+    // Impostazioni zone
+    renderZonesSettings(data.zones || []);
+    
+    // Impostazioni avanzate
+    document.getElementById('max-active-zones').value = data.max_active_zones || 3;
+    document.getElementById('activation-delay').value = data.activation_delay || 0;
+    document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
+    
+    // Mostra il valore del pin del relè di sicurezza (ma non permette di modificarlo)
+    const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
+                        data.safety_relay.pin : 13;
+    document.getElementById('safety-relay-pin').value = safetyRelayPin;
+    document.getElementById('current-safety-pin').textContent = safetyRelayPin;
+    
+    document.getElementById('automatic-programs-enabled').checked = data.automatic_programs_enabled || false;
+    
+    // Resetta i flag delle modifiche
+    settingsModified = {
+        wifi: false,
+        zones: false,
+        advanced: false
+    };
+}
+
+// Aggiorna la funzione saveWifiSettings per utilizzare la modalità selezionata
+function saveWifiSettings() {
+    if (!settingsModified.wifi) {
+        showToast('Nessuna modifica da salvare', 'info');
+        return;
+    }
+    
+    const saveButton = document.getElementById('save-wifi-button');
+    if (saveButton) {
+        saveButton.classList.add('loading');
+        saveButton.disabled = true;
+    }
+    
+    // Ottieni la modalità WiFi selezionata
+    const isClientMode = document.getElementById('wifi-mode-client').checked;
+    
+    // Raccogli i dati dai campi
+    const clientEnabled = isClientMode; // Usa la modalità selezionata
+    const wifiSsid = document.getElementById('wifi-list').value;
+    const wifiPassword = document.getElementById('wifi-password').value;
+    const apSsid = document.getElementById('ap-ssid').value;
+    const apPassword = document.getElementById('ap-password').value;
+    
+    // Validazione
+    if (!apSsid) {
+        showToast('Il nome (SSID) dell\'access point non può essere vuoto', 'error');
+        if (saveButton) {
+            saveButton.classList.remove('loading');
+            saveButton.disabled = false;
+        }
+        return;
+    }
+    
+    if (apPassword && apPassword.length < 8) {
+        showToast('La password dell\'access point deve essere di almeno 8 caratteri', 'error');
+        if (saveButton) {
+            saveButton.classList.remove('loading');
+            saveButton.disabled = false;
+        }
+        return;
+    }
+    
+    // Se client è abilitato, verifica che ci siano SSID e password
+    if (clientEnabled && (!wifiSsid || !wifiPassword)) {
+        showToast('Inserisci SSID e password per la modalità client', 'error');
+        if (saveButton) {
+            saveButton.classList.remove('loading');
+            saveButton.disabled = false;
+        }
+        return;
+    }
+    
+    // Prepara i dati da inviare
+    const wifiSettings = {
+        client_enabled: clientEnabled,
+        wifi: {
+            ssid: wifiSsid,
+            password: wifiPassword
+        },
+        ap: {
+            ssid: apSsid,
+            password: apPassword
+        }
+    };
+    
+    // Invia la richiesta
+    saveSettings(wifiSettings, () => {
+        settingsModified.wifi = false;
+        
+        if (saveButton) {
+            saveButton.classList.remove('loading');
+            saveButton.disabled = false;
+        }
+        
+        showToast('Impostazioni WiFi salvate con successo', 'success');
+        
+        // Aggiorna lo stato della connessione
+        setTimeout(fetchConnectionStatus, 2000);
+    }, () => {
+        if (saveButton) {
+            saveButton.classList.remove('loading');
+            saveButton.disabled = false;
+        }
+    });
+}
+
 // Azzera il file wifi_scan.json
 function clearWifiScanFile() {
     fetch('/clear_wifi_scan_file', { method: 'POST' })

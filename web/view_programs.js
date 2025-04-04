@@ -201,7 +201,6 @@ function updateAutoProgramsStatus(enabled) {
     }
 }
 
-// Renderizza le card dei programmi
 function renderProgramCards(programs, state) {
     const container = document.getElementById('programs-container');
     if (!container) return;
@@ -240,6 +239,9 @@ function renderProgramCards(programs, state) {
         // Costruisci la visualizzazione delle zone
         const zonesHtml = buildZonesGrid(program.steps || []);
         
+        // Get the automatic status (default to true for backward compatibility)
+        const isAutomatic = program.automatic_enabled !== false;
+        
         // Card del programma
         const programCard = document.createElement('div');
         programCard.className = `program-card ${isActive ? 'active-program' : ''}`;
@@ -277,6 +279,24 @@ function renderProgramCards(programs, state) {
                         <div class="zones-grid">
                             ${zonesHtml}
                         </div>
+                    </div>
+                </div>
+                <!-- New row for automatic execution toggle -->
+                <div class="info-row auto-execution-row">
+                    <div class="info-label">Automazione:</div>
+                    <div class="info-value" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div id="auto-icon-${programId}" class="auto-status ${isAutomatic ? 'on' : 'off'}">
+                            <i></i>
+                            <span>Auto: ${isAutomatic ? 'ON' : 'OFF'}</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="auto-switch-${programId}" 
+                                   class="auto-program-toggle" 
+                                   data-program-id="${programId}" 
+                                   ${isAutomatic ? 'checked' : ''}
+                                   onchange="toggleProgramAutomatic('${programId}', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
             </div>
@@ -515,38 +535,31 @@ function deleteProgram(programId) {
         }
     });
 }
-
-// Funzione per attivare/disattivare i programmi automatici
-function toggleAutomaticPrograms(enable) {
-    // Disabilita i pulsanti durante la richiesta
-    const autoBtns = document.querySelectorAll('.auto-btn');
-    autoBtns.forEach(btn => btn.disabled = true);
-    
-    fetch('/toggle_automatic_programs', {
+// Add this function to toggle the automatic status of a program
+function toggleProgramAutomatic(programId, enable) {
+    fetch('/toggle_program_automatic', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enable })
+        body: JSON.stringify({ program_id: programId, enable: enable })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Aggiorna lo stato globale
-            if (window.userData) {
-                window.userData.automatic_programs_enabled = enable;
+            if (typeof showToast === 'function') {
+                showToast(`Automazione del programma ${enable ? 'attivata' : 'disattivata'} con successo`, 'success');
             }
             
-            updateAutoProgramsStatus(enable);
+            // Update the UI to reflect the new state
+            const autoSwitch = document.getElementById(`auto-switch-${programId}`);
+            if (autoSwitch) {
+                autoSwitch.checked = enable;
+            }
             
-            // Aggiorna lo stato attivo dei pulsanti
-            document.querySelectorAll('.auto-btn.on').forEach(btn => {
-                btn.classList.toggle('active', enable);
-            });
-            document.querySelectorAll('.auto-btn.off').forEach(btn => {
-                btn.classList.toggle('active', !enable);
-            });
-            
-            if (typeof showToast === 'function') {
-                showToast(`Programmi automatici ${enable ? 'attivati' : 'disattivati'} con successo`, 'success');
+            // Aggiorna l'icona nella card
+            const autoIcon = document.getElementById(`auto-icon-${programId}`);
+            if (autoIcon) {
+                autoIcon.className = enable ? 'auto-status on' : 'auto-status off';
+                autoIcon.querySelector('span').textContent = enable ? 'Auto: ON' : 'Auto: OFF';
             }
         } else {
             if (typeof showToast === 'function') {
@@ -555,14 +568,10 @@ function toggleAutomaticPrograms(enable) {
         }
     })
     .catch(error => {
-        console.error('Errore durante la modifica dello stato dei programmi automatici:', error);
+        console.error('Errore di rete:', error);
         if (typeof showToast === 'function') {
             showToast('Errore di rete', 'error');
         }
-    })
-    .finally(() => {
-        // Riabilita i pulsanti
-        autoBtns.forEach(btn => btn.disabled = false);
     });
 }
 

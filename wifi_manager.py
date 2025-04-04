@@ -13,6 +13,7 @@ import uasyncio as asyncio
 
 WIFI_RETRY_INTERVAL = 30  # Secondi tra un tentativo di riconnessione e l'altro
 MAX_WIFI_RETRIES = 5      # Numero massimo di tentativi prima di passare alla modalità AP
+WIFI_RETRY_INTERVAL = 600 
 AP_SSID_DEFAULT = "IrrigationSystem"
 AP_PASSWORD_DEFAULT = "12345678"
 WIFI_SCAN_FILE = '/data/wifi_scan.json'
@@ -81,6 +82,7 @@ def clear_wifi_scan_file():
 def connect_to_wifi(ssid, password):
     """
     Tenta di connettersi a una rete WiFi in modalità client.
+    Se la connessione fallisce dopo 10 secondi, attiva la modalità AP.
     
     Args:
         ssid: SSID della rete WiFi
@@ -94,38 +96,38 @@ def connect_to_wifi(ssid, password):
     print(f"Trying to connect to WiFi SSID: {ssid}...")
 
     try:
+        # Assicurati che il client sia attivo
         wlan_sta.active(True)
-        retries = 0
-
-        while not wlan_sta.isconnected() and retries < MAX_WIFI_RETRIES:
-            wlan_sta.connect(ssid, password)
-            for _ in range(10):  # Attendi fino a 10 secondi
-                if wlan_sta.isconnected():
-                    break
-                time.sleep(1)
-            retries += 1
+        time.sleep(1)  # Breve attesa per l'attivazione
+        
+        # Avvia la connessione
+        wlan_sta.connect(ssid, password)
+        
+        # Attendi fino a 10 secondi per la connessione
+        connection_timeout = 10
+        for i in range(connection_timeout):
+            if wlan_sta.isconnected():
+                ip = wlan_sta.ifconfig()[0]
+                log_event(f"Connesso con successo alla rete WiFi: {ssid} con IP {ip}", "INFO")
+                print(f"Connected successfully to WiFi: {ip}")
+                return True
             
-            if not wlan_sta.isconnected() and retries < MAX_WIFI_RETRIES:
-                log_event(f"Tentativo {retries} fallito, riprovo...", "WARNING")
-                print(f"Tentativo {retries} fallito, riprovo...")
-
-        if wlan_sta.isconnected():
-            ip = wlan_sta.ifconfig()[0]
-            log_event(f"Connesso con successo alla rete WiFi: {ssid} con IP {ip}", "INFO")
-            print(f"Connected successfully to WiFi: {ip}")
-            return True
-        else:
-            log_event(f"Impossibile connettersi alla rete WiFi: {ssid} dopo {MAX_WIFI_RETRIES} tentativi", "ERROR")
-            print("Failed to connect to WiFi.")
-            wlan_sta.active(False)
-            return False
+            print(f"Attesa connessione... {i+1}/{connection_timeout} secondi")
+            time.sleep(1)
+        
+        # Se arriviamo qui, la connessione è fallita
+        log_event(f"Connessione a '{ssid}' fallita dopo {connection_timeout} secondi", "WARNING")
+        print(f"Connessione a '{ssid}' fallita dopo {connection_timeout} secondi")
+        
+        # Non disattiviamo il client in caso di fallimento, 
+        # il task retry_client_connection gestirà i tentativi futuri
+        return False
     except Exception as e:
         log_event(f"Errore durante la connessione alla rete WiFi: {e}", "ERROR")
         print(f"Errore durante la connessione alla rete WiFi: {e}")
-        try:
-            wlan_sta.active(False)
-        except:
-            pass
+        
+        # Non disattiviamo il client in caso di errore,
+        # il task retry_client_connection gestirà i tentativi futuri
         return False
 
 def start_access_point(ssid=None, password=None):
@@ -173,6 +175,7 @@ def start_access_point(ssid=None, password=None):
 def initialize_network():
     """
     Inizializza la rete WiFi (client o AP) in base alle impostazioni.
+    Implementa anche il fallback da client a AP se la connessione client fallisce.
     
     Returns:
         boolean: True se l'inizializzazione è riuscita, False altrimenti
@@ -196,10 +199,16 @@ def initialize_network():
             if success:
                 log_event("Modalità client attivata con successo", "INFO")
                 print("Modalità client attivata con successo.")
+                
+                # Configura mDNS per accesso facilitato
+                setup_mdns()
+                
                 return True
             else:
-                log_event("Connessione alla rete WiFi fallita, passando alla modalità AP", "WARNING")
-                print("Connessione alla rete WiFi fallita, passando alla modalità AP.")
+                log_event("Connessione alla rete WiFi fallita, passando alla modalità AP come fallback", "WARNING")
+                print("Connessione alla rete WiFi fallita, passando alla modalità AP come fallback.")
+                # La connessione client fallita, ma lasciamo il client attivo per i tentativi futuri
+                # attivando anche l'AP come fallback
         else:
             log_event("SSID o password non validi per il WiFi client", "WARNING")
             print("SSID o password non validi per il WiFi client.")
@@ -208,61 +217,203 @@ def initialize_network():
     ap_ssid = settings.get('ap', {}).get('ssid', AP_SSID_DEFAULT)
     ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
     success = start_access_point(ap_ssid, ap_password)
+    
+    # Configura mDNS anche in modalità AP
+    setup_mdns()
+    
     return success
 
+def setup_mdns(hostname="irrigation"):
+    """
+    Configura mDNS per l'accesso tramite hostname.local.
+    
+    Args:
+        hostname: Nome host da utilizzare (default: "irrigation")
+        
+    Returns:
+        boolean: True se l'inizializzazione è riuscita, False altrimenti
+    """
+    try:
+        # Tenta di importare il modulo mDNS appropriato in base alla piattaforma
+        try:
+            import mdns
+            mdns_module = 'standard'
+        except ImportError:
+            try:
+                import umdns
+                mdns_module = 'umdns'
+            except ImportError:
+                try:
+                    import esp
+                    mdns_module = 'esp'
+                except ImportError:
+                    raise ImportError("Nessun modulo mDNS trovato")
+        
+        # Inizializza mDNS in base al modulo disponibile
+        if mdns_module == 'standard':
+            mdns.start(hostname)
+        elif mdns_module == 'umdns':
+            umdns.start(hostname)
+        elif mdns_module == 'esp':
+            esp.mdns_init()
+            esp.mdns_add_service(hostname, "_http", "_tcp", 80)
+        
+        log_event(f"mDNS avviato con hostname: {hostname}.local", "INFO")
+        print(f"mDNS avviato con hostname: {hostname}.local")
+        print(f"Ora puoi accedere al sistema digitando: http://{hostname}.local")
+        return True
+        
+    except ImportError:
+        log_event("Modulo mDNS non disponibile, accesso tramite IP", "WARNING")
+        print("Modulo mDNS non disponibile. Accesso tramite IP richiesto.")
+        return False
+    except Exception as e:
+        log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
+        print(f"Errore durante l'inizializzazione di mDNS: {e}")
+        return False
+        
 async def retry_client_connection():
     """
     Task asincrono che verifica periodicamente la connessione WiFi client e tenta di riconnettersi se necessario.
+    Implementa la seguente logica:
+    1. Se la modalità client è abilitata ma non è connesso:
+       - Tenta di riconnettersi immediatamente
+       - Se fallisce, attiva la modalità AP ma continua a tentare la connessione client ogni 10 minuti
+    2. Se la connessione client si stabilisce:
+       - Disattiva la modalità AP
+    3. Se la modalità client è disabilitata:
+       - Assicura che la modalità client sia spenta e quella AP sia attiva
     """
+    last_attempt_time = 0
+    reconnection_tries = 0
+    ap_failover_activated = False
+
     while True:
         try:
-            await asyncio.sleep(WIFI_RETRY_INTERVAL)
-            
+            current_time = time.time()
             wlan_sta = network.WLAN(network.STA_IF)
+            wlan_ap = network.WLAN(network.AP_IF)
             settings = load_user_settings()
             
             client_enabled = settings.get('client_enabled', False)
 
             if client_enabled:
+                # Modalità client abilitata nelle impostazioni
                 if not wlan_sta.isconnected():
-                    log_event("Connessione WiFi client persa, tentativo di riconnessione...", "WARNING")
-                    ssid = settings.get('wifi', {}).get('ssid')
-                    password = settings.get('wifi', {}).get('password')
+                    # Client non connesso - dobbiamo riconnetterlo o attivare AP come fallback
                     
-                    if ssid and password:
-                        success = connect_to_wifi(ssid, password)
-                        if not success:
-                            log_event(f"Impossibile riconnettersi a '{ssid}'. Attivazione della rete AP", "ERROR")
-                            print(f"Impossibile riconnettersi a '{ssid}'. Attivazione della rete AP.")
+                    # Determina se è il momento di tentare una riconnessione
+                    retry_interval = WIFI_RETRY_INTERVAL if ap_failover_activated else WIFI_RETRY_INITIAL_INTERVAL
+                    time_since_last_attempt = current_time - last_attempt_time
+                    
+                    if time_since_last_attempt >= retry_interval:
+                        # È ora di tentare una riconnessione
+                        log_event(f"Tentativo di riconnessione WiFi client (tentativo #{reconnection_tries + 1})", "INFO")
+                        print(f"Tentativo di riconnessione WiFi client (tentativo #{reconnection_tries + 1})")
+                        
+                        ssid = settings.get('wifi', {}).get('ssid')
+                        password = settings.get('wifi', {}).get('password')
+                        
+                        if ssid and password:
+                            last_attempt_time = current_time
+                            reconnection_tries += 1
                             
-                            # Aggiorna le impostazioni solo dopo alcuni tentativi falliti
-                            # per non disabilitare il client dopo una temporanea perdita di connessione
-                            wlan_ap = network.WLAN(network.AP_IF)
+                            # Assicurati che sia attivo
+                            if not wlan_sta.active():
+                                wlan_sta.active(True)
+                                await asyncio.sleep(1)
+                                
+                            # Tenta la connessione
+                            wlan_sta.connect(ssid, password)
+                            
+                            # Attendi fino a 10 secondi per la connessione
+                            connected = False
+                            for _ in range(10):
+                                if wlan_sta.isconnected():
+                                    connected = True
+                                    break
+                                await asyncio.sleep(1)
+                                
+                            if connected:
+                                # Connessione riuscita!
+                                log_event(f"Riconnessione alla rete WiFi '{ssid}' riuscita", "INFO")
+                                print(f"Riconnessione alla rete WiFi '{ssid}' riuscita")
+                                reconnection_tries = 0
+                                ap_failover_activated = False
+                                
+                                # Disattiva l'AP se era stato attivato come fallback
+                                if wlan_ap.active():
+                                    wlan_ap.active(False)
+                                    log_event("Access Point di fallback disattivato", "INFO")
+                                    print("Access Point di fallback disattivato")
+                                    
+                                # Configura mDNS dopo la riconnessione
+                                setup_mdns()
+                            else:
+                                # Connessione fallita, attiva l'AP come fallback se non è già attivo
+                                if not ap_failover_activated:
+                                    log_event(f"Connessione a '{ssid}' fallita, attivazione AP come fallback", "WARNING")
+                                    print(f"Connessione a '{ssid}' fallita, attivazione AP come fallback")
+                                    
+                                    # Attiva l'AP
+                                    if not wlan_ap.active():
+                                        ap_ssid = settings.get('ap', {}).get('ssid', AP_SSID_DEFAULT)
+                                        ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
+                                        start_access_point(ap_ssid, ap_password)
+                                    
+                                    ap_failover_activated = True
+                                else:
+                                    log_event(f"Tentativo di riconnessione a '{ssid}' fallito, continuerò a riprovare", "WARNING")
+                                    print(f"Tentativo di riconnessione a '{ssid}' fallito, continuerò a riprovare")
+                        else:
+                            log_event("SSID o password non validi. Impossibile riconnettersi", "ERROR")
+                            print("SSID o password non validi. Impossibile riconnettersi")
+                            
+                            # Attiva AP come unica opzione
                             if not wlan_ap.active():
-                                start_access_point()
+                                ap_ssid = settings.get('ap', {}).get('ssid', AP_SSID_DEFAULT)
+                                ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
+                                start_access_point(ap_ssid, ap_password)
+                                ap_failover_activated = True
                     else:
-                        log_event("SSID o password non validi. Impossibile riconnettersi", "ERROR")
-                        print("SSID o password non validi. Impossibile riconnettersi.")
+                        # Non è ancora il momento di riprovare, aspetta
+                        await asyncio.sleep(1)
                 else:
-                    # Connessione attiva, verifica che l'AP sia disattivato se necessario
-                    wlan_ap = network.WLAN(network.AP_IF)
-                    if wlan_ap.active():
+                    # Client connesso, tutto OK
+                    if reconnection_tries > 0:
+                        log_event("Connessione WiFi client stabile", "INFO")
+                        print("Connessione WiFi client stabile")
+                        reconnection_tries = 0
+                    
+                    # Disattiva AP se attivo (quando il client funziona, l'AP non serve)
+                    if wlan_ap.active() and ap_failover_activated:
                         wlan_ap.active(False)
-                        log_event("Access Point disattivato, modalità client attiva", "INFO")
+                        log_event("Access Point di fallback disattivato", "INFO")
+                        print("Access Point di fallback disattivato")
+                        ap_failover_activated = False
+                    
+                    # Aspetta un po' prima del prossimo controllo
+                    await asyncio.sleep(30)
             else:
                 # La modalità client è disabilitata
                 if wlan_sta.active():
-                    log_event("Disattivazione della modalità client", "INFO")
-                    print("Disattivazione della modalità client.")
+                    log_event("Disattivazione della modalità client come da configurazione", "INFO")
+                    print("Disattivazione della modalità client come da configurazione")
                     wlan_sta.active(False)
+                    reconnection_tries = 0
+                    ap_failover_activated = False
                     
                 # Assicurati che l'AP sia attivo
-                wlan_ap = network.WLAN(network.AP_IF)
                 if not wlan_ap.active():
-                    log_event("AP non attivo, riattivazione...", "WARNING")
-                    start_access_point()
+                    log_event("AP non attivo, riattivazione come da configurazione", "WARNING")
+                    ap_ssid = settings.get('ap', {}).get('ssid', AP_SSID_DEFAULT)
+                    ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
+                    start_access_point(ap_ssid, ap_password)
+                
+                # Aspetta prima del prossimo controllo
+                await asyncio.sleep(30)
         
         except Exception as e:
-            log_event(f"Errore durante il retry della connessione WiFi: {e}", "ERROR")
-            print(f"Errore durante il retry della connessione WiFi: {e}")
+            log_event(f"Errore durante la gestione della connessione WiFi: {e}", "ERROR")
+            print(f"Errore durante la gestione della connessione WiFi: {e}")
             await asyncio.sleep(5)  # Breve ritardo prima di riprovare in caso di errore

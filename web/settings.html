@@ -2,6 +2,136 @@
 <html lang="it">
 <head>
     <style>
+	/* WiFi Mode Selector Styles */
+.wifi-mode-selector {
+    margin-bottom: 25px;
+    background-color: #f9f9f9;
+    border-radius: 10px;
+    padding: 15px;
+    border: 1px solid #eee;
+}
+
+.wifi-mode-selector h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 16px;
+    color: #333;
+}
+
+.mode-toggle-container {
+    display: flex;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 15px;
+}
+
+.mode-toggle {
+    flex: 1;
+    position: relative;
+}
+
+.mode-toggle input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.mode-toggle label {
+    display: block;
+    text-align: center;
+    padding: 12px;
+    background-color: #f0f0f0;
+    color: #666;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-right: 1px solid #ddd;
+}
+
+.mode-toggle:last-child label {
+    border-right: none;
+}
+
+.mode-toggle input[type="radio"]:checked + label {
+    background-color: #0099ff;
+    color: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.mode-descriptions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mode-description {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    background-color: white;
+    transition: all 0.3s ease;
+}
+
+.mode-description.active {
+    border-color: #0099ff;
+    background-color: #e6f7ff;
+}
+
+.mode-icon {
+    width: 32px;
+    height: 32px;
+    margin-right: 10px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.client-icon {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Cpath d='M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z'/%3E%3C/svg%3E");
+}
+
+.ap-icon {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Cpath d='M12 21l1.45-5.27c.45-1.24 1.64-2.04 2.89-2.06h1.66v-2h-1.67c-2.62-.04-4.88 1.7-5.58 4.08L12 21zM5.28 10.62c-.1.42-.18.83-.18 1.3 0 1.02.27 1.98.74 2.83L2.5 18l1.13 1.25 3.26-3.13c1.18 1.13 2.74 1.88 4.48 1.88h5.62v-2h-5.5c-2.3 0-4.17-1.9-4.17-4.25 0-2.35 1.85-4.25 4.17-4.25h5.5v-2h-5.5c-.92 0-1.78.25-2.52.66l1.11-5.16h-2.08l-3.2 9.62z'/%3E%3C/svg%3E");
+}
+
+.mode-text {
+    font-size: 14px;
+    color: #666;
+}
+
+.mode-text strong {
+    display: block;
+    color: #333;
+    margin-bottom: 2px;
+}
+
+/* WiFi Settings Sections */
+.wifi-settings-section {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f9f9f9;
+    border-radius: 10px;
+    border: 1px solid #eee;
+}
+
+.settings-section-title {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 16px;
+    color: #333;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 8px;
+}
+
+.wifi-save-button {
+    margin-top: 20px;
+    width: 100%;
+    padding: 12px;
+}
         .container {
             max-width: 900px;
             margin: 0 auto;
@@ -416,71 +546,91 @@
             
             <!-- WiFi Settings -->
             <div class="settings-card">
-                <div class="card-header">
-                    <h3>Impostazioni Wi-Fi</h3>
+    <div class="card-header">
+        <h3>Impostazioni Wi-Fi</h3>
+    </div>
+    <div class="card-content">
+        <!-- Nuovo selettore modalità WiFi -->
+        <div class="wifi-mode-selector">
+            <h4>Modalità di Connessione</h4>
+            <div class="mode-toggle-container">
+                <div class="mode-toggle">
+                    <input type="radio" id="wifi-mode-client" name="wifi-mode" value="client" onchange="selectWifiMode('client')">
+                    <label for="wifi-mode-client">Client Wi-Fi</label>
                 </div>
-                <div class="card-content">
-                    <!-- Modalità Client WiFi -->
-                    <div class="input-group">
-                        <div class="input-row" style="justify-content: space-between;">
-                            <label>Modalità Client Wi-Fi:</label>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="client-enabled" onchange="toggleWifiClientSettings(this.checked)">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
+                <div class="mode-toggle">
+                    <input type="radio" id="wifi-mode-ap" name="wifi-mode" value="ap" onchange="selectWifiMode('ap')">
+                    <label for="wifi-mode-ap">Access Point</label>
+                </div>
+            </div>
+            <div class="mode-descriptions">
+                <div id="client-mode-desc" class="mode-description">
+                    <div class="mode-icon client-icon"></div>
+                    <div class="mode-text">
+                        <strong>Modalità Client:</strong> Connetti il sistema a una rete WiFi esistente.
                     </div>
-                    
-                    <div id="wifi-client-settings" style="display: none;">
-                        <div class="input-group">
-                            <label for="wifi-list">Reti disponibili:</label>
-                            <div class="input-row">
-                                <select id="wifi-list" class="input-control"></select>
-                                <button id="scan-wifi-button" class="button secondary" onclick="scanWifiNetworks()">
-                                    Scansiona
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div id="wifi-networks-container" class="wifi-networks" style="display: none;">
-                            <!-- Le reti WiFi verranno generate dinamicamente -->
-                        </div>
-                        
-                        <div class="input-group">
-                            <label for="wifi-password">Password:</label>
-                            <input type="password" id="wifi-password" class="input-control" placeholder="Password della rete WiFi">
-                        </div>
-                        
-                        <button id="connect-wifi-button" class="button primary" onclick="connectToWifi()">
-                            Connetti
-                        </button>
-                    </div>
-                    
-                    <!-- Access Point Settings -->
-                    <div class="input-group" style="margin-top: 20px;">
-                        <label>Impostazioni Access Point (AP):</label>
-                        
-                        <div class="input-group">
-                            <label for="ap-ssid">Nome rete (SSID):</label>
-                            <input type="text" id="ap-ssid" class="input-control" placeholder="Nome rete AP">
-                        </div>
-                        
-                        <div class="input-group">
-                            <label for="ap-password">Password:</label>
-                            <input type="password" id="ap-password" class="input-control" placeholder="Password AP (min. 8 caratteri)">
-                        </div>
-                    </div>
-                    
-                    <button id="save-wifi-button" class="button primary" onclick="saveWifiSettings()">
-                        Salva Impostazioni Wi-Fi
-                    </button>
-                    
-                    <!-- Connection Status -->
-                    <div id="connection-status" class="connection-status">
-                        <p style="text-align:center">Caricamento stato connessione...</p>
+                </div>
+                <div id="ap-mode-desc" class="mode-description">
+                    <div class="mode-icon ap-icon"></div>
+                    <div class="mode-text">
+                        <strong>Modalità Access Point:</strong> Crea una rete WiFi a cui connettersi direttamente.
                     </div>
                 </div>
             </div>
+        </div>
+        
+        <!-- Input nascosto per mantenere compatibilità -->
+        <input type="hidden" id="client-enabled">
+        
+        <!-- Sezione impostazioni client (mostrata/nascosta in base alla modalità) -->
+        <div id="wifi-client-settings" class="wifi-settings-section">
+            <h4 class="settings-section-title">Impostazioni Client Wi-Fi</h4>
+            
+            <div class="input-group">
+                <label for="wifi-list">Reti disponibili:</label>
+                <div class="input-row">
+                    <select id="wifi-list" class="input-control"></select>
+                    <button id="scan-wifi-button" class="button secondary" onclick="scanWifiNetworks()">
+                        Scansiona
+                    </button>
+                </div>
+            </div>
+            
+            <div id="wifi-networks-container" class="wifi-networks" style="display: none;">
+                <!-- Le reti WiFi verranno generate dinamicamente -->
+            </div>
+            
+            <div class="input-group">
+                <label for="wifi-password">Password:</label>
+                <input type="password" id="wifi-password" class="input-control" placeholder="Password della rete WiFi">
+            </div>
+        </div>
+        
+        <!-- Sezione impostazioni AP (mostrata/nascosta in base alla modalità) -->
+        <div id="wifi-ap-settings" class="wifi-settings-section">
+            <h4 class="settings-section-title">Impostazioni Access Point</h4>
+            
+            <div class="input-group">
+                <label for="ap-ssid">Nome rete (SSID):</label>
+                <input type="text" id="ap-ssid" class="input-control" placeholder="Nome rete AP">
+            </div>
+            
+            <div class="input-group">
+                <label for="ap-password">Password:</label>
+                <input type="password" id="ap-password" class="input-control" placeholder="Password AP (min. 8 caratteri)">
+            </div>
+        </div>
+        
+        <button id="save-wifi-button" class="button primary wifi-save-button" onclick="saveWifiSettings()">
+            Salva Impostazioni Wi-Fi
+        </button>
+        
+        <!-- Connection Status -->
+        <div id="connection-status" class="connection-status">
+            <p style="text-align:center">Caricamento stato connessione...</p>
+        </div>
+    </div>
+</div>
             
             <!-- Zone Settings -->
             <div class="settings-card">

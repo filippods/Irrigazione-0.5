@@ -359,11 +359,9 @@ async def check_programs():
     Controlla se ci sono programmi da eseguire automaticamente.
     Deve essere chiamato periodicamente.
     """
-    # Carica le impostazioni per verificare se i programmi automatici sono abilitati
-    settings = load_user_settings()
-    if not settings.get('automatic_programs_enabled', False):
-        return
-
+    # Rimosso controllo globale di automatic_programs_enabled
+    # ora controlliamo per ogni singolo programma
+    
     programs = load_programs()
     if not programs:
         return
@@ -371,6 +369,10 @@ async def check_programs():
     current_time_str = time.strftime('%H:%M', time.localtime())
 
     for program_id, program in programs.items():
+        # Verifica se questo programma specifico ha l'automazione abilitata
+        if not program.get('automatic_enabled', True):  # Default a True per compatibilità
+            continue
+            
         activation_time = program.get('activation_time', '')
         
         # Verifica se il programma deve essere eseguito
