@@ -173,6 +173,8 @@ def is_program_active_in_current_month(program):
     program_months = [months_map[month] for month in program.get('months', []) if month in months_map]
     return current_month in program_months
 
+# Replace is_program_due_today in program_manager.py
+
 def is_program_due_today(program):
     """
     Verifica se il programma è previsto per oggi in base alla cadenza.
@@ -183,14 +185,25 @@ def is_program_due_today(program):
     Returns:
         boolean: True se il programma è previsto per oggi, False altrimenti
     """
-    current_day_of_year = time.localtime()[7]
+    current_time = time.localtime()
+    current_year = current_time[0]
+    current_month = current_time[1]
+    current_day = current_time[2]
+    
+    # Calculate current day of year without using strftime
+    current_day_of_year = _day_of_year(current_year, current_month, current_day)
+    
     last_run_day = -1
 
     if 'last_run_date' in program:
         try:
             last_run_date = program['last_run_date']
-            year, month, day = map(int, last_run_date.split('-'))
-            last_run_day = time.localtime(time.mktime((year, month, day, 0, 0, 0, 0, 0)))[7]
+            date_parts = last_run_date.split('-')
+            if len(date_parts) == 3:
+                year, month, day = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
+                last_run_day = _day_of_year(year, month, day)
+            else:
+                log_event(f"Formato data non valido: {last_run_date}", "ERROR")
         except Exception as e:
             log_event(f"Errore nella conversione della data di esecuzione: {e}", "ERROR")
             print(f"Errore nella conversione della data di esecuzione: {e}")
@@ -354,6 +367,8 @@ def reset_program_state():
     save_program_state()
     log_event("Stato del programma resettato", "INFO")
 
+# Replace the check_programs function in program_manager.py
+
 async def check_programs():
     """
     Controlla se ci sono programmi da eseguire automaticamente.
@@ -365,8 +380,10 @@ async def check_programs():
     programs = load_programs()
     if not programs:
         return
-        
-    current_time_str = time.strftime('%H:%M', time.localtime())
+    
+    # Get current time in HH:MM format 
+    t = time.localtime()
+    current_time_str = f"{t[3]:02d}:{t[4]:02d}"
 
     for program_id, program in programs.items():
         # Verifica se questo programma specifico ha l'automazione abilitata
@@ -393,6 +410,23 @@ async def check_programs():
             if success:
                 update_last_run_date(program_id)
 
+# Replace these functions in program_manager.py
+
+def _get_formatted_date(t=None):
+    """
+    Custom function to format date as YYYY-MM-DD since strftime isn't available in MicroPython
+    
+    Args:
+        t: Time tuple (optional, uses current time if None)
+        
+    Returns:
+        str: Formatted date string
+    """
+    if t is None:
+        t = time.localtime()
+    return f"{t[0]}-{t[1]:02d}-{t[2]:02d}"
+
+# Replace the line using time.strftime in update_last_run_date function with:
 def update_last_run_date(program_id):
     """
     Aggiorna la data dell'ultima esecuzione del programma.
@@ -401,7 +435,7 @@ def update_last_run_date(program_id):
         program_id: ID del programma
     """
     program_id = str(program_id)  # Assicura che l'ID sia una stringa
-    current_date = time.strftime('%Y-%m-%d', time.localtime())
+    current_date = _get_formatted_date()  # Use our custom function instead of strftime
     programs = load_programs()
     
     if program_id in programs:

@@ -13,6 +13,13 @@ import gc
 import machine
 import time
 
+# Tentativo di importare il watchdog hardware
+try:
+    from machine import WDT
+    HAS_WATCHDOG = True
+except (ImportError, AttributeError):
+    HAS_WATCHDOG = False
+
 # Intervallo di controllo dei programmi in secondi
 PROGRAM_CHECK_INTERVAL = 30
 
@@ -43,19 +50,48 @@ async def watchdog_loop():
             
             log_event(f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
             
-            # Forza la garbage collection ogni ora
+            # Forza la garbage collection
             gc.collect()
             
-            await asyncio.sleep(3600)  # 1 ora
+            # Se memoria bassa, forza una garbage collection aggressiva
+            if percent_free < 20:
+                log_event("Memoria bassa rilevata, esecuzione pulizia aggressiva", "WARNING")
+                # Esegui più volte la garbage collection
+                for _ in range(3):
+                    gc.collect()
+                # Riavvia il server web se la memoria è estremamente bassa
+                if percent_free < 10:
+                    log_event("Memoria critica, riavvio del server web", "WARNING")
+                    try:
+                        from web_server import app
+                        if hasattr(app, 'server') and app.server:
+                            app.server.close()
+                            await asyncio.sleep(1)
+                            asyncio.create_task(app.start_server(host='0.0.0.0', port=80))
+                    except Exception as e:
+                        log_event(f"Errore nel riavvio del server web: {e}", "ERROR")
+            
+            # Controllo ogni 10 minuti invece di ogni ora
+            await asyncio.sleep(600)
         except Exception as e:
             log_event(f"Errore nel watchdog: {e}", "ERROR")
-            await asyncio.sleep(600)  # 10 minuti in caso di errore
+            await asyncio.sleep(60)  # Ridotto a 1 minuto in caso di errore
 
 async def main():
     """
     Funzione principale che inizializza il sistema e avvia i task asincroni.
     """
     try:
+        # Inizializza il watchdog hardware se disponibile
+        wdt = None
+        if HAS_WATCHDOG:
+            try:
+                wdt = WDT(timeout=60000)  # timeout di 60 secondi
+                log_event("Watchdog hardware inizializzato", "INFO")
+            except Exception as e:
+                log_event(f"Hardware watchdog non inizializzato: {e}", "WARNING")
+                print(f"Hardware watchdog non inizializzato: {e}")
+        
         log_event("Avvio del sistema di irrigazione", "INFO")
         
         # Disattiva Bluetooth se disponibile per risparmiare memoria
@@ -127,8 +163,10 @@ async def main():
         log_event("Sistema avviato con successo", "INFO")
         print("Sistema avviato con successo. In esecuzione...")
         
-        # Loop principale
+        # Loop principale - resetta il watchdog hardware
         while True:
+            if wdt:
+                wdt.feed()  # Reimposta il watchdog hardware
             await asyncio.sleep(1)
 
     except Exception as e:

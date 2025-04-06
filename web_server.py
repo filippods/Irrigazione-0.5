@@ -45,7 +45,11 @@ DATA_BASE_PATH = '/data'
 WIFI_SCAN_FILE = '/data/wifi_scan.json'
 
 app = Microdot()
-Request.max_content_length = 1024 * 1024  # 1MB per le richieste
+
+# Migliore gestione delle richieste
+Request.max_content_length = 32 * 1024  # 32KB per le richieste
+Request.max_body_length = 16 * 1024     # 16KB per il corpo
+Request.max_readline = 1024             # 1KB per riga di richiesta
 
 def json_response(data, status_code=200):
     """
@@ -81,9 +85,41 @@ def file_exists(path):
     except OSError:
         return False
 
+# Decorator per forzare garbage collection dopo le chiamate alle API
+def with_gc(route_handler):
+    """
+    Decorator per forzare garbage collection dopo le chiamate alle API.
+    
+    Args:
+        route_handler: Funzione da decorare
+        
+    Returns:
+        function: Funzione decorata
+    """
+    async def wrapper(request, *args, **kwargs):
+        try:
+            result = None
+            if asyncio.iscoroutinefunction(route_handler):
+                result = await route_handler(request, *args, **kwargs)
+            else:
+                result = route_handler(request, *args, **kwargs)
+            
+            # Forza garbage collection
+            gc.collect()
+            return result
+        except Exception as e:
+            log_event(f"Errore in API '{route_handler.__name__}': {e}", "ERROR")
+            gc.collect()
+            return json_response({'error': str(e)}, 500)
+    
+    # Mantieni il nome originale della funzione
+    wrapper.__name__ = route_handler.__name__
+    return wrapper
+
 # -------- API endpoints --------
 
 @app.route('/data/system_log.json', methods=['GET'])
+@with_gc
 def get_system_logs(request):
     """API per ottenere i log di sistema."""
     try:
@@ -94,6 +130,7 @@ def get_system_logs(request):
         return json_response({'error': str(e)}, 500)
 
 @app.route('/clear_logs', methods=['POST'])
+@with_gc
 def clear_system_logs(request):
     """API per cancellare i log di sistema."""
     try:
@@ -108,6 +145,7 @@ def clear_system_logs(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/data/wifi_scan.json', methods=['GET'])
+@with_gc
 def get_wifi_scan_results(request):
     """API per ottenere i risultati della scansione WiFi."""
     try:
@@ -120,6 +158,7 @@ def get_wifi_scan_results(request):
         return Response('Internal Server Error', status_code=500)
 
 @app.route('/scan_wifi', methods=['GET'])
+@with_gc
 def scan_wifi(request):
     """API per avviare una scansione WiFi."""
     try:
@@ -156,6 +195,7 @@ def scan_wifi(request):
         return json_response({'error': 'Errore durante la scansione delle reti WiFi'}, 500)
 
 @app.route('/clear_wifi_scan_file', methods=['POST'])
+@with_gc
 def clear_wifi_scan(request):
     """API per cancellare il file di scansione WiFi."""
     try:
@@ -166,6 +206,7 @@ def clear_wifi_scan(request):
         return json_response({'error': str(e)}, 500)
 
 @app.route('/get_zones_status', methods=['GET'])
+@with_gc
 def get_zones_status_endpoint(request):
     """API per ottenere lo stato delle zone."""
     try:
@@ -177,9 +218,9 @@ def get_zones_status_endpoint(request):
         return json_response({'error': str(e)}, 500)
 
 @app.route('/get_connection_status', methods=['GET'])
+@with_gc
 def get_connection_status(request):
     """API per ottenere lo stato della connessione WiFi."""
-    print("Richiesta GET /get_connection_status ricevuta")
     try:
         wlan_sta = network.WLAN(network.STA_IF)
         wlan_ap = network.WLAN(network.AP_IF)
@@ -207,6 +248,7 @@ def get_connection_status(request):
         return json_response({'error': str(e)}, 500)
 
 @app.route('/activate_ap', methods=['POST'])
+@with_gc
 def activate_ap(request):
     """API per attivare l'access point."""
     try:
@@ -219,6 +261,7 @@ def activate_ap(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/data/user_settings.json', methods=['GET'])
+@with_gc
 def get_user_settings(request):
     """API per ottenere le impostazioni utente."""
     try:
@@ -236,6 +279,7 @@ def get_user_settings(request):
         return Response('Errore interno del server', status_code=500)
 
 @app.route('/data/program.json', methods=['GET'])
+@with_gc
 def get_programs(request):
     """API per ottenere i programmi."""
     try:
@@ -247,6 +291,7 @@ def get_programs(request):
         return Response('Errore interno del server', status_code=500)
 
 @app.route('/toggle_automatic_programs', methods=['POST'])
+@with_gc
 def toggle_automatic_programs(request):
     """API per abilitare/disabilitare i programmi automatici."""
     try:
@@ -269,6 +314,7 @@ def toggle_automatic_programs(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/get_zones', methods=['GET'])
+@with_gc
 def get_zones(request):
     """API per ottenere la lista delle zone."""
     try:
@@ -281,6 +327,7 @@ def get_zones(request):
         return json_response({'error': 'Errore nel caricamento delle zone'}, 500)
 
 @app.route('/start_zone', methods=['POST'])
+@with_gc
 def handle_start_zone(request):
     """API per avviare una zona."""
     try:
@@ -325,6 +372,7 @@ def handle_start_zone(request):
         return json_response({'error': "Errore durante l'avvio della zona", "success": False}, 500)
 
 @app.route('/stop_zone', methods=['POST'])
+@with_gc
 def handle_stop_zone(request):
     """API per fermare una zona."""
     try:
@@ -354,6 +402,7 @@ def handle_stop_zone(request):
         return json_response({'error': "Errore durante l'arresto della zona", "success": False}, 500)
 
 @app.route('/stop_program', methods=['POST'])
+@with_gc
 def stop_program_route(request):
     """API per fermare il programma corrente."""
     try:
@@ -367,6 +416,7 @@ def stop_program_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/save_program', methods=['POST'])
+@with_gc
 def save_program_route(request):
     """API per salvare un nuovo programma."""
     try:
@@ -425,6 +475,7 @@ def save_program_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/update_program', methods=['PUT'])
+@with_gc
 def update_program_route(request):
     """API per aggiornare un programma esistente."""
     try:
@@ -458,6 +509,7 @@ def update_program_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/toggle_program_automatic', methods=['POST'])
+@with_gc
 def toggle_program_automatic(request):
     """API per abilitare/disabilitare l'automazione di un singolo programma."""
     try:
@@ -492,6 +544,7 @@ def toggle_program_automatic(request):
         return json_response({'success': False, 'error': str(e)}, 500)
         
 @app.route('/delete_program', methods=['POST'])
+@with_gc
 def delete_program_route(request):
     """API per eliminare un programma."""
     try:
@@ -520,6 +573,7 @@ def delete_program_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/restart_system', methods=['POST'])
+@with_gc
 def restart_system_route(request):
     """API per riavviare il sistema."""
     try:
@@ -542,6 +596,7 @@ async def _delayed_reset(delay_seconds):
     machine.reset()
 
 @app.route('/reset_settings', methods=['POST'])
+@with_gc
 def reset_settings_route(request):
     """API per ripristinare le impostazioni predefinite."""
     try:
@@ -558,6 +613,7 @@ def reset_settings_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/reset_factory_data', methods=['POST'])
+@with_gc
 def reset_factory_data_route(request):
     """API per ripristinare le impostazioni e i dati di fabbrica."""
     try:
@@ -574,6 +630,7 @@ def reset_factory_data_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/start_program', methods=['POST'])
+@with_gc
 async def start_program_route(request):
     """API per avviare manualmente un programma."""
     try:
@@ -614,6 +671,7 @@ async def start_program_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/get_program_state', methods=['GET'])
+@with_gc
 def get_program_state(request):
     """API per ottenere lo stato del programma corrente."""
     try:
@@ -630,6 +688,7 @@ def get_program_state(request):
         return json_response({'program_running': False, 'current_program_id': None})
 
 @app.route('/connect_wifi', methods=['POST'])
+@with_gc
 def connect_wifi_route(request):
     """API per connettersi a una rete WiFi."""
     try:
@@ -693,6 +752,7 @@ def connect_wifi_route(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/save_user_settings', methods=['POST'])
+@with_gc
 def save_user_settings_route(request):
     """API per salvare le impostazioni utente."""
     try:
@@ -758,6 +818,7 @@ def save_user_settings_route(request):
         return json_response({'success': False, 'error': str(e)})
 
 @app.route('/disconnect_wifi', methods=['POST'])
+@with_gc
 def disconnect_wifi(request):
     """API per disconnettere il client WiFi."""
     try:
@@ -774,6 +835,7 @@ def disconnect_wifi(request):
         return json_response({'success': False, 'error': str(e)}, 500)
 
 @app.route('/', methods=['GET'])
+@with_gc
 def index(request):
     """Route per servire la pagina principale."""
     try:
@@ -784,6 +846,7 @@ def index(request):
         return Response('Errore interno del server', status_code=500)
 
 @app.route('/<path:path>', methods=['GET'])
+@with_gc
 def static_files(request, path):
     """Route per servire i file statici."""
     try:
@@ -834,6 +897,10 @@ async def start_web_server():
         
         # Libera memoria prima di avviare il server
         gc.collect()
+        
+        # Configurazioni per migliorare la stabilità
+        Request.max_content_length = 32 * 1024  # Limitare la dimensione massima della richiesta
+        Request.max_readline = 1024  # Ridurre la dimensione massima delle righe di richiesta
         
         # Avvia il server sulla porta 80
         await app.start_server(host='0.0.0.0', port=80)

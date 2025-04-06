@@ -382,3 +382,45 @@ async def start_diagnostics():
     log_event("Sistema di diagnostica inizializzato", "INFO")
     print("Sistema di diagnostica inizializzato.")
     return diagnostic_task
+    
+# Modify the watchdog_loop function in main.py to run more frequently
+async def watchdog_loop():
+    """
+    Task asincrono che monitora lo stato del sistema e registra
+    periodicamente le informazioni di memoria disponibile.
+    """
+    while True:
+        try:
+            free_mem = gc.mem_free()
+            allocated_mem = gc.mem_alloc()
+            total_mem = free_mem + allocated_mem
+            percent_free = (free_mem / total_mem) * 100
+            
+            log_event(f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
+            
+            # Forza la garbage collection più frequentemente
+            gc.collect()
+            
+            # Se memoria bassa, forza una garbage collection aggressiva
+            if percent_free < 20:
+                log_event("Memoria bassa rilevata, esecuzione pulizia aggressiva", "WARNING")
+                # Esegui più volte la garbage collection
+                for _ in range(3):
+                    gc.collect()
+                # Riavvia il server web se la memoria è estremamente bassa
+                if percent_free < 10:
+                    log_event("Memoria critica, riavvio del server web", "WARNING")
+                    try:
+                        from web_server import app
+                        if hasattr(app, 'server') and app.server:
+                            app.server.close()
+                            await asyncio.sleep(1)
+                            asyncio.create_task(app.start_server(host='0.0.0.0', port=80))
+                    except Exception as e:
+                        log_event(f"Errore nel riavvio del server web: {e}", "ERROR")
+            
+            # Riduci l'intervallo da 1 ora a 10 minuti per verificare più spesso la memoria
+            await asyncio.sleep(600)
+        except Exception as e:
+            log_event(f"Errore nel watchdog: {e}", "ERROR")
+            await asyncio.sleep(60)  # Ridotto da 600 a 60 secondi in caso di errore

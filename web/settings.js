@@ -12,7 +12,7 @@ var settingsModified = {
 
 // Funzione per inizializzare la pagina delle impostazioni
 function initializeSettingsPage(userData) {
-    console.log("Inizializzazione pagina impostazioni con dati:", userData);
+    console.log("Inizializzazione pagina impostazioni");
     
     if (userData && Object.keys(userData).length > 0) {
         loadSettingsWithData(userData);
@@ -80,11 +80,10 @@ function loadSettingsWithData(data) {
     document.getElementById('activation-delay').value = data.activation_delay || 0;
     document.getElementById('max-zone-duration').value = data.max_zone_duration || 180;
     
-    // Imposta il valore del pin del relè di sicurezza (solo visualizzazione)
+    // Imposta il valore del pin del relè di sicurezza (solo nell'hidden input)
     const safetyRelayPin = data.safety_relay && data.safety_relay.pin !== undefined ? 
                         data.safety_relay.pin : 13;
     document.getElementById('safety-relay-pin').value = safetyRelayPin;
-    document.getElementById('safety-relay-pin-display').textContent = safetyRelayPin;
     
     // Resetta i flag delle modifiche
     settingsModified = {
@@ -193,12 +192,6 @@ function renderZonesSettings(zones) {
                 <input type="text" id="zone-name-${zone.id}" class="input-control zone-name-input" 
                        value="${zone.name || `Zona ${zone.id + 1}`}" maxlength="16" 
                        placeholder="Nome zona" data-zone-id="${zone.id}">
-            </div>
-            <!-- Visualizzazione del PIN (non modificabile) -->
-            <div class="input-group">
-                <label for="zone-pin-${zone.id}">PIN:</label>
-                <div class="pin-display">${zone.pin !== undefined ? zone.pin : (14 + zone.id)}</div>
-                <input type="hidden" id="zone-pin-${zone.id}" value="${zone.pin !== undefined ? zone.pin : (14 + zone.id)}">
             </div>
             <div class="input-group">
                 <div class="input-row" style="justify-content: space-between;">
@@ -461,13 +454,15 @@ function saveZonesSettings() {
     zoneCards.forEach(card => {
         const zoneId = parseInt(card.dataset.zoneId);
         const nameInput = card.querySelector('.zone-name-input');
-        const pinInput = document.getElementById(`zone-pin-${zoneId}`);
         const statusToggle = card.querySelector('.zone-status-toggle');
         
-        if (nameInput && pinInput && statusToggle) {
+        if (nameInput && statusToggle) {
             const name = nameInput.value.trim();
-            const pin = parseInt(pinInput.value);
             const status = statusToggle.checked ? 'show' : 'hide';
+            
+            // Ottieni il pin dalla configurazione attuale
+            const currentZone = window.userData.zones.find(z => z.id === zoneId);
+            const pin = currentZone && currentZone.pin !== undefined ? currentZone.pin : 14 + zoneId;
             
             zones.push({
                 id: zoneId,
@@ -855,13 +850,6 @@ function executeFactoryReset() {
             factoryResetButton.disabled = false;
         }
     });
-}
-
-// Azzera il file wifi_scan.json
-function clearWifiScanFile() {
-    fetch('/clear_wifi_scan_file', { method: 'POST' })
-        .then(response => console.log('File wifi_scan.json azzerato'))
-        .catch(error => console.error('Errore durante l\'azzeramento del file wifi_scan.json:', error));
 }
 
 // Inizializzazione quando il documento è caricato

@@ -28,6 +28,8 @@ def _ensure_log_file_exists():
             except OSError:
                 pass
 
+# Add this to log_manager.py to replace any strftime usage
+
 def _get_current_date():
     """Ottiene la data corrente nel formato YYYY-MM-DD"""
     t = time.localtime()
@@ -37,6 +39,31 @@ def _get_current_time():
     """Ottiene l'ora corrente nel formato HH:MM:SS"""
     t = time.localtime()
     return f"{t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
+
+# In program_manager.py, add this for is_program_due_today function:
+def _day_of_year(year, month, day):
+    """
+    Calcola il giorno dell'anno da una data.
+    
+    Args:
+        year: Anno
+        month: Mese
+        day: Giorno
+        
+    Returns:
+        int: Giorno dell'anno (1-366)
+    """
+    days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    
+    # Gestione anno bisestile
+    if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+        days_in_month[2] = 29
+    
+    day_of_year = day
+    for i in range(1, month):
+        day_of_year += days_in_month[i]
+    
+    return day_of_year
 
 def log_event(message, level="INFO"):
     """

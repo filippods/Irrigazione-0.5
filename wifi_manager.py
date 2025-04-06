@@ -14,6 +14,7 @@ import uasyncio as asyncio
 WIFI_RETRY_INTERVAL = 30  # Secondi tra un tentativo di riconnessione e l'altro
 MAX_WIFI_RETRIES = 5      # Numero massimo di tentativi prima di passare alla modalità AP
 WIFI_RETRY_INTERVAL = 600 
+WIFI_RETRY_INITIAL_INTERVAL = 30
 AP_SSID_DEFAULT = "IrrigationSystem"
 AP_PASSWORD_DEFAULT = "12345678"
 WIFI_SCAN_FILE = '/data/wifi_scan.json'
@@ -223,6 +224,8 @@ def initialize_network():
     
     return success
 
+# Replace the setup_mdns function in wifi_manager.py
+
 def setup_mdns(hostname="irrigation"):
     """
     Configura mDNS per l'accesso tramite hostname.local.
@@ -237,36 +240,32 @@ def setup_mdns(hostname="irrigation"):
         # Tenta di importare il modulo mDNS appropriato in base alla piattaforma
         try:
             import mdns
-            mdns_module = 'standard'
+            mdns.start(hostname)
+            log_event(f"mDNS avviato con hostname: {hostname}.local (standard)", "INFO")
+            return True
         except ImportError:
             try:
                 import umdns
-                mdns_module = 'umdns'
+                umdns.start(hostname)
+                log_event(f"mDNS avviato con hostname: {hostname}.local (umdns)", "INFO")
+                return True
             except ImportError:
                 try:
                     import esp
-                    mdns_module = 'esp'
-                except ImportError:
-                    raise ImportError("Nessun modulo mDNS trovato")
-        
-        # Inizializza mDNS in base al modulo disponibile
-        if mdns_module == 'standard':
-            mdns.start(hostname)
-        elif mdns_module == 'umdns':
-            umdns.start(hostname)
-        elif mdns_module == 'esp':
-            esp.mdns_init()
-            esp.mdns_add_service(hostname, "_http", "_tcp", 80)
-        
-        log_event(f"mDNS avviato con hostname: {hostname}.local", "INFO")
-        print(f"mDNS avviato con hostname: {hostname}.local")
-        print(f"Ora puoi accedere al sistema digitando: http://{hostname}.local")
-        return True
-        
-    except ImportError:
-        log_event("Modulo mDNS non disponibile, accesso tramite IP", "WARNING")
-        print("Modulo mDNS non disponibile. Accesso tramite IP richiesto.")
-        return False
+                    # Check if the esp module has the mdns_init attribute
+                    if hasattr(esp, 'mdns_init'):
+                        esp.mdns_init()
+                        esp.mdns_add_service(hostname, "_http", "_tcp", 80)
+                        log_event(f"mDNS avviato con hostname: {hostname}.local (esp)", "INFO")
+                        return True
+                    else:
+                        # If attribute missing, fail gracefully
+                        log_event("Modulo ESP presente ma mdns_init non disponibile", "WARNING")
+                        raise AttributeError("esp module doesn't support mdns_init")
+                except (ImportError, AttributeError):
+                    log_event("Modulo mDNS non disponibile, accesso tramite IP", "WARNING")
+                    print("Modulo mDNS non disponibile. Accesso tramite IP richiesto.")
+                    return False
     except Exception as e:
         log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
         print(f"Errore durante l'inizializzazione di mDNS: {e}")

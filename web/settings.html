@@ -2,95 +2,96 @@
 <html lang="it">
 <head>
     <style>
-	/* WiFi Mode Selector Styles */
-.wifi-mode-selector {
-    margin-bottom: 25px;
-    background-color: #f9f9f9;
-    border-radius: 10px;
-    padding: 15px;
-    border: 1px solid #eee;
-}
+        /* WiFi Mode Selector Styles */
+        .wifi-mode-selector {
+            margin-bottom: 25px;
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid #eee;
+        }
 
-.wifi-mode-selector h4 {
-    margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 16px;
-    color: #333;
-}
+        .wifi-mode-selector h4 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #333;
+        }
 
-.mode-descriptions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
+        .mode-descriptions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
 
-.mode-description {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    border-radius: 6px;
-    border: 1px solid #ddd;
-    background-color: white;
-    transition: all 0.3s ease;
-    cursor: pointer;
-}
+        .mode-description {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            background-color: white;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
 
-.mode-description.active {
-    border-color: #0099ff;
-    background-color: #e6f7ff;
-}
+        .mode-description.active {
+            border-color: #0099ff;
+            background-color: #e6f7ff;
+        }
 
-.mode-icon {
-    width: 32px;
-    height: 32px;
-    margin-right: 10px;
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
-}
+        .mode-icon {
+            width: 32px;
+            height: 32px;
+            margin-right: 10px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
 
-.client-icon {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Cpath d='M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z'/%3E%3C/svg%3E");
-}
+        .client-icon {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Cpath d='M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z'/%3E%3C/svg%3E");
+        }
 
-.ap-icon {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Ctext x='0' y='15' font-family='Arial' font-size='12' fill='%230099ff'%3EAP%3C/text%3E%3C/svg%3E");
-}
+        .ap-icon {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230099ff'%3E%3Ctext x='0' y='15' font-family='Arial' font-size='12' fill='%230099ff'%3EAP%3C/text%3E%3C/svg%3E");
+        }
 
-.mode-text {
-    font-size: 14px;
-    color: #666;
-}
+        .mode-text {
+            font-size: 14px;
+            color: #666;
+        }
 
-.mode-text strong {
-    display: block;
-    color: #333;
-    margin-bottom: 2px;
-}
+        .mode-text strong {
+            display: block;
+            color: #333;
+            margin-bottom: 2px;
+        }
 
-/* WiFi Settings Sections */
-.wifi-settings-section {
-    margin-top: 20px;
-    padding: 15px;
-    background-color: #f9f9f9;
-    border-radius: 10px;
-    border: 1px solid #eee;
-}
+        /* WiFi Settings Sections */
+        .wifi-settings-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            border: 1px solid #eee;
+        }
 
-.settings-section-title {
-    margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 16px;
-    color: #333;
-    border-bottom: 1px solid #ddd;
-    padding-bottom: 8px;
-}
+        .settings-section-title {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 8px;
+        }
 
-.wifi-save-button {
-    margin-top: 20px;
-    width: 100%;
-    padding: 12px;
-}
+        .wifi-save-button {
+            margin-top: 20px;
+            width: 100%;
+            padding: 12px;
+        }
+        
         .container {
             max-width: 900px;
             margin: 0 auto;
@@ -320,8 +321,8 @@
         /* System Actions */
         .system-actions {
             margin-top: 20px;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            display: flex;
+            flex-direction: column;
             gap: 15px;
         }
         
@@ -342,6 +343,7 @@
         
         .restart-btn {
             background-color: #ff9900;
+            margin-bottom: 10px;
         }
         
         .restart-btn:hover {
@@ -446,17 +448,6 @@
             font-style: italic;
             margin-top: 5px;
         }
-        
-        /* Pin display style */
-        .pin-display {
-            background-color: #f0f0f0;
-            padding: 8px 12px;
-            border-radius: 4px;
-            color: #666;
-            font-size: 14px;
-            font-weight: 500;
-            display: inline-block;
-        }
 
         /* Confirmation Dialog */
         .overlay {
@@ -509,7 +500,7 @@
             }
             
             .system-actions {
-                grid-template-columns: 1fr;
+                flex-direction: column;
             }
             
             .input-row {
@@ -537,10 +528,6 @@
             .zones-grid {
                 grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             }
-            
-            .system-actions {
-                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            }
         }
     </style>
 </head>
@@ -551,81 +538,81 @@
             
             <!-- WiFi Settings -->
             <div class="settings-card">
-    <div class="card-header">
-        <h3>Impostazioni Wi-Fi</h3>
-    </div>
-    <div class="card-content">
-        <!-- Selettore modalità WiFi -->
-        <div class="wifi-mode-selector">
-            <h4>Modalità di Connessione</h4>
-            <div class="mode-descriptions">
-                <div id="client-mode-desc" class="mode-description" onclick="selectWifiMode('client')">
-                    <div class="mode-icon client-icon"></div>
-                    <div class="mode-text">
-                        <strong>Modalità Client:</strong> Connetti il sistema a una rete WiFi esistente.
-                    </div>
+                <div class="card-header">
+                    <h3>Impostazioni Wi-Fi</h3>
                 </div>
-                <div id="ap-mode-desc" class="mode-description" onclick="selectWifiMode('ap')">
-                    <div class="mode-icon ap-icon"></div>
-                    <div class="mode-text">
-                        <strong>Modalità Access Point:</strong> Crea una rete WiFi a cui connettersi direttamente.
+                <div class="card-content">
+                    <!-- Selettore modalità WiFi -->
+                    <div class="wifi-mode-selector">
+                        <h4>Modalità di Connessione</h4>
+                        <div class="mode-descriptions">
+                            <div id="client-mode-desc" class="mode-description" onclick="selectWifiMode('client')">
+                                <div class="mode-icon client-icon"></div>
+                                <div class="mode-text">
+                                    <strong>Modalità Client:</strong> Connetti il sistema a una rete WiFi esistente.
+                                </div>
+                            </div>
+                            <div id="ap-mode-desc" class="mode-description" onclick="selectWifiMode('ap')">
+                                <div class="mode-icon ap-icon"></div>
+                                <div class="mode-text">
+                                    <strong>Modalità Access Point:</strong> Crea una rete WiFi a cui connettersi direttamente.
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Input nascosto per mantenere compatibilità -->
-        <input type="hidden" id="client-enabled">
-        
-        <!-- Sezione impostazioni client (mostrata/nascosta in base alla modalità) -->
-        <div id="wifi-client-settings" class="wifi-settings-section">
-            <h4 class="settings-section-title">Impostazioni Client Wi-Fi</h4>
-            
-            <div class="input-group">
-                <label for="wifi-list">Reti disponibili:</label>
-                <div class="input-row">
-                    <select id="wifi-list" class="input-control"></select>
-                    <button id="scan-wifi-button" class="button secondary" onclick="scanWifiNetworks()">
-                        Scansiona
+                    
+                    <!-- Input nascosto per mantenere compatibilità -->
+                    <input type="hidden" id="client-enabled">
+                    
+                    <!-- Sezione impostazioni client (mostrata/nascosta in base alla modalità) -->
+                    <div id="wifi-client-settings" class="wifi-settings-section">
+                        <h4 class="settings-section-title">Impostazioni Client Wi-Fi</h4>
+                        
+                        <div class="input-group">
+                            <label for="wifi-list">Reti disponibili:</label>
+                            <div class="input-row">
+                                <select id="wifi-list" class="input-control"></select>
+                                <button id="scan-wifi-button" class="button secondary" onclick="scanWifiNetworks()">
+                                    Scansiona
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="wifi-networks-container" class="wifi-networks" style="display: none;">
+                            <!-- Le reti WiFi verranno generate dinamicamente -->
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="wifi-password">Password:</label>
+                            <input type="password" id="wifi-password" class="input-control" placeholder="Password della rete WiFi">
+                        </div>
+                    </div>
+                    
+                    <!-- Sezione impostazioni AP (mostrata/nascosta in base alla modalità) -->
+                    <div id="wifi-ap-settings" class="wifi-settings-section">
+                        <h4 class="settings-section-title">Impostazioni Access Point</h4>
+                        
+                        <div class="input-group">
+                            <label for="ap-ssid">Nome rete (SSID):</label>
+                            <input type="text" id="ap-ssid" class="input-control" placeholder="Nome rete AP">
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="ap-password">Password:</label>
+                            <input type="password" id="ap-password" class="input-control" placeholder="Password AP (min. 8 caratteri)">
+                        </div>
+                    </div>
+                    
+                    <button id="save-wifi-button" class="button primary wifi-save-button" onclick="saveWifiSettings()">
+                        Salva Impostazioni Wi-Fi
                     </button>
+                    
+                    <!-- Connection Status -->
+                    <div id="connection-status" class="connection-status">
+                        <p style="text-align:center">Caricamento stato connessione...</p>
+                    </div>
                 </div>
             </div>
-            
-            <div id="wifi-networks-container" class="wifi-networks" style="display: none;">
-                <!-- Le reti WiFi verranno generate dinamicamente -->
-            </div>
-            
-            <div class="input-group">
-                <label for="wifi-password">Password:</label>
-                <input type="password" id="wifi-password" class="input-control" placeholder="Password della rete WiFi">
-            </div>
-        </div>
-        
-        <!-- Sezione impostazioni AP (mostrata/nascosta in base alla modalità) -->
-        <div id="wifi-ap-settings" class="wifi-settings-section">
-            <h4 class="settings-section-title">Impostazioni Access Point</h4>
-            
-            <div class="input-group">
-                <label for="ap-ssid">Nome rete (SSID):</label>
-                <input type="text" id="ap-ssid" class="input-control" placeholder="Nome rete AP">
-            </div>
-            
-            <div class="input-group">
-                <label for="ap-password">Password:</label>
-                <input type="password" id="ap-password" class="input-control" placeholder="Password AP (min. 8 caratteri)">
-            </div>
-        </div>
-        
-        <button id="save-wifi-button" class="button primary wifi-save-button" onclick="saveWifiSettings()">
-            Salva Impostazioni Wi-Fi
-        </button>
-        
-        <!-- Connection Status -->
-        <div id="connection-status" class="connection-status">
-            <p style="text-align:center">Caricamento stato connessione...</p>
-        </div>
-    </div>
-</div>
             
             <!-- Zone Settings -->
             <div class="settings-card">
@@ -634,7 +621,7 @@
                 </div>
                 <div class="card-content">
                     <div id="zones-grid" class="zones-grid">
-                        <!-- Zone cards will be populated here via JavaScript -->
+                        <!-- Le card delle zone verranno generate tramite Javascript -->
                         <p style="text-align:center; grid-column: 1/-1;">Caricamento zone...</p>
                     </div>
                     
@@ -665,11 +652,8 @@
                         <input type="number" id="max-zone-duration" class="input-control" min="1" max="1440" value="180">
                     </div>
                     
-                    <div class="input-group">
-                        <label for="safety-relay-pin">Pin relè di sicurezza:</label>
-                        <div class="pin-display" id="safety-relay-pin-display">13</div>
-                        <input type="hidden" id="safety-relay-pin" value="13">
-                    </div>
+                    <!-- Pin relè di sicurezza (nascosto) -->
+                    <input type="hidden" id="safety-relay-pin" value="13">
                     
                     <button id="save-advanced-button" class="button primary" onclick="saveAdvancedSettings()">
                         Salva Impostazioni Avanzate
