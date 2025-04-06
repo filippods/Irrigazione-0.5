@@ -85,7 +85,6 @@ def file_exists(path):
     except OSError:
         return False
 
-# Decorator per forzare garbage collection dopo le chiamate alle API
 def with_gc(route_handler):
     """
     Decorator per forzare garbage collection dopo le chiamate alle API.
@@ -96,24 +95,32 @@ def with_gc(route_handler):
     Returns:
         function: Funzione decorata
     """
-    async def wrapper(request, *args, **kwargs):
+    def wrapper(*args, **kwargs):
         try:
-            result = None
+            # Gestisci sia funzioni asincrone che sincrone
             if asyncio.iscoroutinefunction(route_handler):
-                result = await route_handler(request, *args, **kwargs)
+                async def _async_wrapper():
+                    result = await route_handler(*args, **kwargs)
+                    gc.collect()
+                    return result
+                return _async_wrapper()
             else:
-                result = route_handler(request, *args, **kwargs)
-            
-            # Forza garbage collection
-            gc.collect()
-            return result
+                result = route_handler(*args, **kwargs)
+                gc.collect()
+                return result
         except Exception as e:
-            log_event(f"Errore in API '{route_handler.__name__}': {e}", "ERROR")
+            # Ottieni il nome della funzione in modo sicuro
+            func_name = getattr(route_handler, '__name__', 'unknown')
+            log_event(f"Errore in API '{func_name}': {e}", "ERROR")
             gc.collect()
             return json_response({'error': str(e)}, 500)
     
-    # Mantieni il nome originale della funzione
-    wrapper.__name__ = route_handler.__name__
+    # Copia alcuni metadati in modo sicuro
+    try:
+        wrapper.__name__ = route_handler.__name__
+    except Exception:
+        pass
+    
     return wrapper
 
 # -------- API endpoints --------
