@@ -170,18 +170,18 @@
         }
 
         /* Overlay scuro quando il menu è aperto */
-        .overlay {
-            position: fixed;
-            top: 60px;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 998;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.3s ease;
-        }
+.overlay {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 997; /* Abbassato da 998 per essere sotto il menu */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease;
+}
 
         .overlay.active {
             opacity: 1;

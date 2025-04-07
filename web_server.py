@@ -95,19 +95,13 @@ def with_gc(route_handler):
     Returns:
         function: Funzione decorata
     """
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         try:
-            # Gestisci sia funzioni asincrone che sincrone
-            if asyncio.iscoroutinefunction(route_handler):
-                async def _async_wrapper():
-                    result = await route_handler(*args, **kwargs)
-                    gc.collect()
-                    return result
-                return _async_wrapper()
-            else:
-                result = route_handler(*args, **kwargs)
-                gc.collect()
-                return result
+            result = route_handler(*args, **kwargs)
+            if hasattr(result, 'send') and hasattr(result, 'throw'):
+                result = await result
+            gc.collect()
+            return result
         except Exception as e:
             # Ottieni il nome della funzione in modo sicuro
             func_name = getattr(route_handler, '__name__', 'unknown')
@@ -117,11 +111,11 @@ def with_gc(route_handler):
     
     # Copia alcuni metadati in modo sicuro
     try:
-        wrapper.__name__ = route_handler.__name__
+        async_wrapper.__name__ = route_handler.__name__
     except Exception:
         pass
     
-    return wrapper
+    return async_wrapper
 
 # -------- API endpoints --------
 
