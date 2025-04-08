@@ -176,7 +176,7 @@ def start_access_point(ssid=None, password=None):
 def setup_mdns(hostname="irrigation"):
     """
     Configura mDNS per l'accesso tramite hostname.local.
-    Implementazione ottimizzata per ESP32 con gestione specifica per vari moduli mDNS.
+    Modificata per ridurre messaggi di errore ripetitivi.
     
     Args:
         hostname: Nome host da utilizzare (default: "irrigation")
@@ -185,21 +185,9 @@ def setup_mdns(hostname="irrigation"):
         boolean: True se l'inizializzazione è riuscita, False altrimenti
     """
     try:
-        # Evita errori sul bus i2c disattivando temporaneamente i2c
-        # (problema noto con alcune versioni del firmware ESP32)
-        try:
-            from machine import Pin, I2C
-            i2c_instances = []
-            for i in range(2):  # ESP32 ha 2 periferiche I2C
-                try:
-                    i2c = I2C(i)
-                    i2c.deinit()  # Disattiva temporaneamente
-                    i2c_instances.append((i, i2c))
-                except:
-                    pass
-        except:
-            i2c_instances = []
-            
+        # Messaggio iniziale
+        print(f"Tentativo di configurazione mDNS con hostname: {hostname}.local")
+        
         # Implementazione per ESP-IDF
         try:
             import esp
@@ -208,17 +196,10 @@ def setup_mdns(hostname="irrigation"):
                 esp.mdns_add_service(hostname, "_http", "_tcp", 80)
                 log_event(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)", "INFO")
                 print(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)")
-                
-                # Reinizializza i2c se necessario
-                for i, i2c in i2c_instances:
-                    try:
-                        i2c.init()
-                    except:
-                        pass
-                        
                 return True
-        except (ImportError, AttributeError, Exception) as e:
-            log_event(f"Errore con mdns ESP-IDF: {e}", "WARNING")
+        except (ImportError, AttributeError):
+            # Non registriamo errori nei log per moduli mancanti
+            pass
             
         # Implementazione per moduli network con mDNS incorporato
         try:
@@ -227,65 +208,14 @@ def setup_mdns(hostname="irrigation"):
                 network.mDNS.init(hostname)
                 log_event(f"mDNS avviato con hostname: {hostname}.local (network)", "INFO")
                 print(f"mDNS avviato con hostname: {hostname}.local (network)")
-                
-                # Reinizializza i2c se necessario
-                for i, i2c in i2c_instances:
-                    try:
-                        i2c.init()
-                    except:
-                        pass
-                        
                 return True
-        except (ImportError, AttributeError, Exception) as e:
-            log_event(f"Errore con mdns network: {e}", "WARNING")
+        except (ImportError, AttributeError):
+            # Non registriamo errori nei log per moduli mancanti
+            pass
             
-        # Implementazione per modulo mdns standard
-        try:
-            import mdns
-            mdns.start(hostname)
-            log_event(f"mDNS avviato con hostname: {hostname}.local (standard)", "INFO")
-            print(f"mDNS avviato con hostname: {hostname}.local (standard)")
-            
-            # Reinizializza i2c se necessario
-            for i, i2c in i2c_instances:
-                try:
-                    i2c.init()
-                except:
-                    pass
-                    
-            return True
-        except (ImportError, Exception) as e:
-            log_event(f"Errore con mdns standard: {e}", "WARNING")
-            
-        # Implementazione per modulo umdns per MicroPython
-        try:
-            import umdns
-            umdns.start(hostname)
-            log_event(f"mDNS avviato con hostname: {hostname}.local (umdns)", "INFO")
-            print(f"mDNS avviato con hostname: {hostname}.local (umdns)")
-            
-            # Reinizializza i2c se necessario
-            for i, i2c in i2c_instances:
-                try:
-                    i2c.init()
-                except:
-                    pass
-                    
-            return True
-        except (ImportError, Exception) as e:
-            log_event(f"Errore con umdns: {e}", "WARNING")
-        
         # Se arriviamo qui, nessuna implementazione mDNS ha funzionato
         log_event("Nessun modulo mDNS disponibile, accesso tramite IP", "WARNING")
         print("Nessun modulo mDNS disponibile. Accesso tramite IP richiesto.")
-        
-        # Reinizializza i2c se necessario
-        for i, i2c in i2c_instances:
-            try:
-                i2c.init()
-            except:
-                pass
-                
         return False
     except Exception as e:
         log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
@@ -320,17 +250,8 @@ def initialize_network():
                 log_event("Modalità client attivata con successo", "INFO")
                 print("Modalità client attivata con successo.")
                 
-                # Configura mDNS per accesso facilitato - tentativi multipli
-                mdns_success = False
-                for attempt in range(3):
-                    if setup_mdns():
-                        mdns_success = True
-                        break
-                    time.sleep(1)
-                
-                if not mdns_success:
-                    log_event("Non è stato possibile configurare mDNS dopo 3 tentativi", "WARNING")
-                
+                # Configura mDNS per accesso facilitato - un solo tentativo
+                setup_mdns()
                 return True
             else:
                 log_event("Connessione alla rete WiFi fallita, passando alla modalità AP come fallback", "WARNING")
@@ -346,17 +267,8 @@ def initialize_network():
     ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
     success = start_access_point(ap_ssid, ap_password)
     
-    # Configura mDNS anche in modalità AP
-    mdns_success = False
-    for attempt in range(3):
-        if setup_mdns():
-            mdns_success = True
-            break
-        time.sleep(1)
-    
-    if not mdns_success:
-        log_event("Non è stato possibile configurare mDNS in modalità AP dopo 3 tentativi", "WARNING")
-    
+    # Configura mDNS anche in modalità AP - un solo tentativo
+    setup_mdns()
     return success
 
 async def retry_client_connection():
@@ -439,9 +351,6 @@ async def retry_client_connection():
                                 if not mdns_configured:
                                     if setup_mdns():
                                         mdns_configured = True
-                                    else:
-                                        # Riprova più tardi
-                                        mdns_configured = False
                             else:
                                 # Connessione fallita, attiva l'AP come fallback se non è già attivo
                                 if not ap_failover_activated:
@@ -489,9 +398,6 @@ async def retry_client_connection():
                     if not mdns_configured:
                         if setup_mdns():
                             mdns_configured = True
-                        else:
-                            # Riprova più tardi
-                            mdns_configured = False
                     
                     # Aspetta un po' prima del prossimo controllo
                     await asyncio.sleep(30)
@@ -515,9 +421,6 @@ async def retry_client_connection():
                 if not mdns_configured:
                     if setup_mdns():
                         mdns_configured = True
-                    else:
-                        # Riprova più tardi
-                        mdns_configured = False
                 
                 # Aspetta prima del prossimo controllo
                 await asyncio.sleep(30)
