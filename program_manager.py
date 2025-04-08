@@ -283,8 +283,36 @@ async def execute_program(program, manual=False):
     # Salva lo stato aggiornato su file
     save_program_state()
     
+    # Effettua più tentativi per assicurarsi che lo stato sia persistente
+    retry_count = 0
+    max_retries = 3
+    state_persisted = False
+    
+    while retry_count < max_retries and not state_persisted:
+        # Verifica lo stato salvato
+        current_state = program_running
+        current_id = current_program_id
+        
+        load_program_state()
+        
+        # Controlla se lo stato caricato corrisponde a quello impostato
+        if program_running == current_state and current_program_id == current_id:
+            state_persisted = True
+            break
+        
+        # Se lo stato non è corretto, lo reimpostiamo e risalviamo
+        log_event(f"Stato del programma non persistito, tentativo {retry_count + 1}/{max_retries}", "WARNING")
+        program_running = current_state
+        current_program_id = current_id
+        save_program_state()
+        
+        retry_count += 1
+        await asyncio.sleep(0.2)  # Breve pausa tra i tentativi
+    
     # Verifica che lo stato sia stato aggiornato correttamente
     print(f"Programma avviato: program_running={program_running}, current_program_id={current_program_id}")
+    if not state_persisted:
+        log_event("IMPORTANTE: Impossibile persistere lo stato del programma dopo multipli tentativi", "ERROR")
     
     # Altri log
     program_name = program.get('name', 'Senza nome')
@@ -385,8 +413,19 @@ def stop_program():
     """
     global program_running, current_program_id
     
+    # Salva i valori originali per il debug e la verifica
+    original_running = program_running
+    original_id = current_program_id
+    
     # Ricarica lo stato per assicurarsi di avere dati aggiornati
     load_program_state()
+    
+    # Se non era in esecuzione prima e ora lo è, considera quello originale
+    # Questo è in particolare per gestire i casi di race condition nei caricamenti da file
+    if not program_running and original_running:
+        log_event(f"Stato incoerente rilevato durante l'arresto: era {original_running}, ora {program_running}", "WARNING")
+        program_running = True
+        current_program_id = original_id
     
     if not program_running:
         log_event("Nessun programma in esecuzione da interrompere", "INFO")
@@ -394,15 +433,55 @@ def stop_program():
         
     log_event(f"Interruzione del programma {current_program_id} in corso.", "INFO")
     print("Interruzione del programma in corso.")
+    
+    # Arresta prima tutte le zone e solo successivamente aggiorna lo stato
+    # Questo per evitare che il programma venga marcato come interrotto ma le zone restino attive
+    try:
+        if not stop_all_zones():
+            log_event("Errore nell'arresto delle zone durante l'interruzione del programma", "ERROR")
+            # Continuiamo comunque per aggiornare lo stato
+        else:
+            log_event("Tutte le zone sono state arrestate correttamente", "INFO")
+    except Exception as e:
+        log_event(f"Eccezione durante l'arresto delle zone: {e}", "ERROR")
+        # Continuiamo comunque per aggiornare lo stato
+    
+    # Ora aggiorna lo stato del programma
     program_running = False
     current_program_id = None
-    save_program_state()  # Assicurati che lo stato venga salvato correttamente
-
-    # Aggiunto controllo errori per fermare tutte le zone
-    if not stop_all_zones():
-        log_event("Errore nell'arresto di tutte le zone durante l'interruzione del programma", "ERROR")
-    else:
-        log_event("Tutte le zone sono state arrestate correttamente", "INFO")
+    
+    # Salva lo stato su file e verifica che sia stato salvato correttamente
+    save_program_state()  
+    
+    # Effettua più tentativi per garantire che lo stato sia persistito
+    retry_count = 0
+    max_retries = 3
+    state_saved = False
+    
+    while retry_count < max_retries and not state_saved:
+        # Verifica lo stato salvato
+        temp_running = program_running
+        temp_id = current_program_id
+        
+        # Ricarica lo stato
+        load_program_state()
+        
+        # Controlla se lo stato è stato salvato correttamente
+        if program_running == temp_running and current_program_id == temp_id:
+            state_saved = True
+            break
+        
+        # Se lo stato non è stato salvato correttamente, risalva
+        log_event(f"Stato programma non persistito durante l'arresto, tentativo {retry_count + 1}/{max_retries}", "WARNING")
+        program_running = temp_running
+        current_program_id = temp_id
+        save_program_state()
+        
+        retry_count += 1
+        time.sleep(0.2)  # Breve pausa tra i tentativi
+    
+    if not state_saved:
+        log_event("IMPORTANTE: Impossibile persistere lo stato del programma dopo arresto", "ERROR")
         
     return True
 
