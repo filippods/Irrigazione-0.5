@@ -708,7 +708,7 @@ function cleanupSettingsPage() {
     }
 }
 
-// Funzioni di conferma per le azioni di sistema
+// Funzioni di conferma per le azioni di sistema - MODIFICATO PER USARE confirmation-overlay
 function confirmRestartSystem() {
     // Apri la finestra di conferma per il riavvio
     const overlay = document.getElementById('restart-overlay');

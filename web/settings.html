@@ -449,8 +449,8 @@
             margin-top: 5px;
         }
 
-        /* Confirmation Dialog */
-        .overlay {
+        /* Confirmation Dialog - MODIFICATO DA .overlay A .confirmation-overlay */
+        .confirmation-overlay {
             display: none;
             position: fixed;
             top: 0;
@@ -463,7 +463,7 @@
             align-items: center;
         }
 
-        .overlay.active {
+        .confirmation-overlay.active {
             display: flex;
         }
 
@@ -685,8 +685,8 @@
         </div>
     </main>
     
-    <!-- Factory Reset Confirmation Dialog -->
-    <div id="factory-reset-overlay" class="overlay">
+    <!-- Factory Reset Confirmation Dialog - MODIFICATO DA overlay A confirmation-overlay -->
+    <div id="factory-reset-overlay" class="confirmation-overlay">
         <div class="confirm-dialog">
             <h3>Attenzione: Reset Dati di Fabbrica</h3>
             <p>Questa operazione cancellerà <strong>definitivamente</strong> tutti i programmi e resetterà tutte le impostazioni. Sei assolutamente sicuro di voler procedere?</p>
@@ -697,8 +697,8 @@
         </div>
     </div>
     
-    <!-- Second Factory Reset Confirmation Dialog -->
-    <div id="factory-reset-final-overlay" class="overlay">
+    <!-- Second Factory Reset Confirmation Dialog - MODIFICATO DA overlay A confirmation-overlay -->
+    <div id="factory-reset-final-overlay" class="confirmation-overlay">
         <div class="confirm-dialog">
             <h3>Conferma Definitiva</h3>
             <p>Tutti i dati verranno persi. Questa operazione non può essere annullata. Confermi di voler procedere?</p>
@@ -709,8 +709,8 @@
         </div>
     </div>
     
-    <!-- Restart Confirmation Dialog -->
-    <div id="restart-overlay" class="overlay">
+    <!-- Restart Confirmation Dialog - MODIFICATO DA overlay A confirmation-overlay -->
+    <div id="restart-overlay" class="confirmation-overlay">
         <div class="confirm-dialog">
             <h3>Conferma Riavvio</h3>
             <p>Sei sicuro di voler riavviare il sistema? Tutte le connessioni attive verranno chiuse.</p>
