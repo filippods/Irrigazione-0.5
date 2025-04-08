@@ -59,7 +59,7 @@ def save_programs(programs):
 
 def check_program_conflicts(program, programs, exclude_id=None):
     """
-    Verifica se ci sono conflitti tra programmi negli stessi mesi.
+    Verifica se ci sono conflitti tra programmi negli stessi mesi e con lo stesso orario.
     
     Args:
         program: Programma da verificare
@@ -73,14 +73,21 @@ def check_program_conflicts(program, programs, exclude_id=None):
     if not program_months:
         return False, ""
     
+    program_time = program.get('activation_time', '')
+    if not program_time:
+        return False, ""  # Senza orario non ci possono essere conflitti
+    
     for pid, existing_program in programs.items():
         if exclude_id and str(pid) == str(exclude_id):
             continue  # Salta il programma stesso durante la modifica
             
         existing_months = set(existing_program.get('months', []))
-        if program_months.intersection(existing_months):
-            # C'è una sovrapposizione nei mesi
-            return True, f"Conflitto con il programma '{existing_program.get('name', '')}' nei mesi selezionati"
+        existing_time = existing_program.get('activation_time', '')
+        
+        # Verifica se c'è sovrapposizione nei mesi E lo stesso orario di attivazione
+        if program_months.intersection(existing_months) and program_time == existing_time:
+            # C'è una sovrapposizione nei mesi e lo stesso orario
+            return True, f"Conflitto con il programma '{existing_program.get('name', '')}' nei mesi e orario selezionati"
     
     return False, ""
 
@@ -101,7 +108,7 @@ def update_program(program_id, updated_program):
     # Verifica conflitti (escludi il programma che stiamo aggiornando)
     has_conflict, conflict_message = check_program_conflicts(updated_program, programs, exclude_id=program_id)
     if has_conflict:
-        log_event(f"Conflitto durante l'aggiornamento del programma {program_id}: {conflict_message}", "WARNING")
+        log_event(f"Conflitto programma: {conflict_message}", "WARNING")
         return False, conflict_message
     
     if program_id in programs:
@@ -247,13 +254,21 @@ async def execute_program(program, manual=False):
         active_count = get_active_zones_count()
         if active_count > 0:
             log_event("Arresto di tutte le zone attive per dare priorità al programma automatico", "INFO")
-            if not stop_all_zones():
-                log_event("Errore nell'arresto di tutte le zone attive, continuazione comunque", "WARNING")
-            await asyncio.sleep(1)  # Piccolo ritardo per sicurezza
+            try:
+                if not stop_all_zones():
+                    log_event("Errore nell'arresto di tutte le zone attive, continuazione comunque", "WARNING")
+                await asyncio.sleep(1)  # Piccolo ritardo per sicurezza
+            except Exception as e:
+                log_event(f"Errore durante l'arresto delle zone attive: {e}", "ERROR")
+                # Continuiamo comunque anche in caso di errore, ma lo registriamo
 
     # Spegni tutte le zone prima di avviare un nuovo programma
-    if not stop_all_zones():
-        log_event("Errore nell'arresto di tutte le zone prima dell'avvio del programma", "ERROR")
+    try:
+        if not stop_all_zones():
+            log_event("Errore nell'arresto di tutte le zone prima dell'avvio del programma", "ERROR")
+            return False
+    except Exception as e:
+        log_event(f"Eccezione durante l'arresto di tutte le zone: {e}", "ERROR")
         return False
 
     program_id = str(program.get('id', '0'))  # Assicura che l'ID sia una stringa
@@ -268,6 +283,7 @@ async def execute_program(program, manual=False):
     settings = load_user_settings()
     activation_delay = settings.get('activation_delay', 0)
     
+    successful_execution = False
     try:
         for i, step in enumerate(program.get('steps', [])):
             if not program_running:
@@ -314,19 +330,27 @@ async def execute_program(program, manual=False):
                         break
                     await asyncio.sleep(1)
         
-        update_last_run_date(program_id)
-        log_event(f"Programma {program_name} completato", "INFO")
-        return True
+        # Se siamo arrivati qui senza interruzioni, l'esecuzione è considerata riuscita
+        if program_running:
+            successful_execution = True
+            update_last_run_date(program_id)
+            log_event(f"Programma {program_name} completato con successo", "INFO")
+        
+        return successful_execution
     except Exception as e:
         log_event(f"Errore durante l'esecuzione del programma {program_name}: {e}", "ERROR")
         print(f"Errore durante l'esecuzione del programma: {e}")
         return False
     finally:
-        program_running = False
-        current_program_id = None
-        save_program_state()
-        # Assicurati che tutte le zone siano disattivate, anche in caso di errore
-        stop_all_zones()  
+        # Assicurati che queste operazioni vengano sempre eseguite, anche in caso di errore
+        try:
+            program_running = False
+            current_program_id = None
+            save_program_state()
+            # Assicurati che tutte le zone siano disattivate, anche in caso di errore
+            stop_all_zones()
+        except Exception as final_e:
+            log_event(f"Errore finale durante la pulizia del programma: {final_e}", "ERROR")
 
 def stop_program():
     """
@@ -413,10 +437,9 @@ async def check_programs():
                 
             # Avvia il programma con gestione degli errori migliorata
             try:
+                # execute_program già aggiorna la data dell'ultima esecuzione in caso di successo
                 success = await execute_program(program)
-                if success:
-                    update_last_run_date(program_id)
-                else:
+                if not success:
                     log_event(f"Errore durante l'esecuzione del programma {program_id}", "ERROR")
             except Exception as e:
                 log_event(f"Eccezione durante l'esecuzione del programma {program_id}: {e}", "ERROR")

@@ -8,7 +8,7 @@ from machine import Pin
 import uasyncio as asyncio
 from settings_manager import load_user_settings
 from log_manager import log_event
-from program_state import program_running
+from program_state import program_running, load_program_state
 
 # Variabili globali
 active_zones = {}
@@ -155,8 +155,10 @@ def start_zone(zone_id, duration):
     zone_id = int(zone_id)
     duration = int(duration)
     
+    # Ricarica lo stato per avere dati aggiornati prima della verifica critica
+    load_program_state()
+    
     # Verifica se un programma è in esecuzione
-    # Nota: Usiamo program_running importato direttamente all'inizio del file
     if program_running:
         log_event(f"Impossibile avviare la zona {zone_id}: un programma è già in esecuzione", "WARNING")
         print(f"Impossibile avviare la zona {zone_id}: un programma è già in esecuzione.")
@@ -203,6 +205,15 @@ def start_zone(zone_id, duration):
     except Exception as e:
         log_event(f"Errore durante l'attivazione della zona {zone_id}: {e}", "ERROR")
         print(f"Errore durante l'attivazione della zona {zone_id}: {e}")
+        
+        # Disattiva il relè di sicurezza se era stato attivato e non ci sono altre zone attive
+        if safety_relay and not active_zones:
+            try:
+                safety_relay.value(1)  # Disattiva il relè di sicurezza (logica attiva bassa)
+                log_event("Relè di sicurezza disattivato dopo errore", "INFO")
+            except Exception as nested_e:
+                log_event(f"Errore durante lo spegnimento del relè di sicurezza dopo errore: {nested_e}", "ERROR")
+        
         return False
 
     # Se la zona è già attiva, cancella il task precedente
