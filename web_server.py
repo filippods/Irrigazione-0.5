@@ -107,7 +107,7 @@ def with_gc(route_handler):
             func_name = getattr(route_handler, '__name__', 'unknown')
             log_event(f"Errore in API '{func_name}': {e}", "ERROR")
             gc.collect()
-            return json_response({'error': str(e)}, 500)
+            return json_response({'error': str(e)}, 200)  # Usa 200 per evitare errori client
     
     # Copia alcuni metadati in modo sicuro
     try:
@@ -208,15 +208,19 @@ def clear_wifi_scan(request):
 
 @app.route('/get_zones_status', methods=['GET'])
 @with_gc
-def get_zones_status_endpoint(request):
+async def get_zones_status_endpoint(request):
     """API per ottenere lo stato delle zone."""
     try:
+        # Breve pausa per prevenire polling troppo frequenti
+        await asyncio.sleep(0.1)
+        
         zones_status = get_zones_status()
         return json_response(zones_status)
     except Exception as e:
         log_event(f"Errore nel recupero dello stato delle zone: {e}", "ERROR")
         print(f"Errore nel recupero dello stato delle zone: {e}")
-        return json_response({'error': str(e)}, 500)
+        # Restituisci una risposta fallback sicura
+        return json_response([], 200)  # Restituiamo un array vuoto con status 200 invece di 500
 
 @app.route('/get_connection_status', methods=['GET'])
 @with_gc
@@ -630,6 +634,31 @@ def reset_factory_data_route(request):
         print(f"Errore durante il reset dei dati di fabbrica: {e}")
         return json_response({'success': False, 'error': str(e)}, 500)
 
+@app.route('/get_program_state', methods=['GET'])
+@with_gc
+async def get_program_state(request):
+    """API per ottenere lo stato del programma corrente."""
+    try:
+        # Breve pausa per prevenire polling troppo frequenti
+        await asyncio.sleep(0.1)
+        
+        # Ricarichiamo lo stato per essere sicuri di avere dati aggiornati
+        try:
+            load_program_state()
+        except Exception as e:
+            log_event(f"Errore durante il caricamento dello stato del programma: {e}", "ERROR")
+            return json_response({'program_running': False, 'current_program_id': None})
+            
+        state = {
+            'program_running': program_running,
+            'current_program_id': current_program_id
+        }
+        return json_response(state)
+    except Exception as e:
+        log_event(f"Errore durante la risposta dello stato del programma: {e}", "ERROR")
+        print(f"Errore durante la risposta dello stato del programma: {e}")
+        return json_response({'program_running': False, 'current_program_id': None})
+
 @app.route('/start_program', methods=['POST'])
 @with_gc
 async def start_program_route(request):
@@ -670,23 +699,6 @@ async def start_program_route(request):
         log_event(f"Errore nell'avvio del programma: {e}", "ERROR")
         print(f"Errore nell'avvio del programma: {e}")
         return json_response({'success': False, 'error': str(e)}, 500)
-
-@app.route('/get_program_state', methods=['GET'])
-@with_gc
-def get_program_state(request):
-    """API per ottenere lo stato del programma corrente."""
-    try:
-        # Ricarichiamo lo stato per essere sicuri di avere dati aggiornati
-        load_program_state()
-        state = {
-            'program_running': program_running,
-            'current_program_id': current_program_id
-        }
-        return json_response(state)
-    except Exception as e:
-        log_event(f"Errore durante il caricamento dello stato del programma: {e}", "ERROR")
-        print(f"Errore durante il caricamento dello stato del programma: {e}")
-        return json_response({'program_running': False, 'current_program_id': None})
 
 @app.route('/connect_wifi', methods=['POST'])
 @with_gc

@@ -81,32 +81,52 @@ def get_zones_status():
     global active_zones
     zones_status = []
     
-    settings = load_user_settings()
-    configured_zones = settings.get('zones', [])
-    
-    for zone in configured_zones:
-        zone_id = zone.get('id')
-        if zone.get('status') != 'show':
-            continue
+    try:
+        settings = load_user_settings()
+        if not settings or not isinstance(settings, dict):
+            log_event("Errore: Impostazioni non valide durante il recupero dello stato delle zone", "ERROR")
+            return []
             
-        zone_info = {
-            'id': zone_id,
-            'name': zone.get('name', f'Zona {zone_id + 1}'),
-            'active': zone_id in active_zones,
-            'remaining_time': 0
-        }
+        configured_zones = settings.get('zones', [])
         
-        # Calcola il tempo rimanente se la zona è attiva
-        if zone_id in active_zones:
-            start_time = active_zones[zone_id].get('start_time', 0)
-            duration = active_zones[zone_id].get('duration', 0) * 60  # In secondi
-            elapsed = int(time.time() - start_time)
-            remaining = max(0, duration - elapsed)
-            zone_info['remaining_time'] = remaining
+        for zone in configured_zones:
+            if not zone or not isinstance(zone, dict):
+                continue
+                
+            zone_id = zone.get('id')
+            if zone_id is None:
+                continue
+                
+            if zone.get('status') != 'show':
+                continue
+                
+            zone_info = {
+                'id': zone_id,
+                'name': zone.get('name', f'Zona {zone_id + 1}'),
+                'active': zone_id in active_zones,
+                'remaining_time': 0
+            }
             
-        zones_status.append(zone_info)
-    
-    return zones_status
+            # Calcola il tempo rimanente se la zona è attiva
+            if zone_id in active_zones:
+                zone_data = active_zones.get(zone_id, {})
+                start_time = zone_data.get('start_time', 0)
+                duration = zone_data.get('duration', 0) * 60  # In secondi
+                
+                try:
+                    elapsed = int(time.time() - start_time)
+                    remaining = max(0, duration - elapsed)
+                    zone_info['remaining_time'] = remaining
+                except Exception as e:
+                    log_event(f"Errore nel calcolo del tempo rimanente per la zona {zone_id}: {e}", "ERROR")
+                    zone_info['remaining_time'] = 0
+                
+            zones_status.append(zone_info)
+        
+        return zones_status
+    except Exception as e:
+        log_event(f"Errore nel get_zones_status: {e}", "ERROR")
+        return []
 
 def get_active_zones_count():
     """

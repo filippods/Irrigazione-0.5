@@ -45,9 +45,9 @@ function initializeManualPage(userData) {
 
 // Funzione per avviare il polling dello stato delle zone
 function startZoneStatusPolling() {
-    // Esegui immediatamente e poi ogni 3 secondi
+    // Esegui immediatamente e poi ogni 5 secondi (invece di 3)
     fetchZonesStatus();
-    zoneStatusInterval = setInterval(fetchZonesStatus, 3000);
+    zoneStatusInterval = setInterval(fetchZonesStatus, 5000);
     console.log("Polling zone avviato");
 }
 
@@ -135,19 +135,24 @@ function renderZones(zones) {
     fetchZonesStatus();
 }
 
-// Recupera lo stato delle zone dal server
+// Funzione migliorata per recuperare lo stato delle zone
 function fetchZonesStatus() {
     fetch('/get_zones_status')
         .then(response => {
-            if (!response.ok) throw new Error('Errore nel recupero dello stato delle zone');
+            if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
             return response.json();
         })
         .then(zonesStatus => {
             console.log("Stato zone ricevuto:", zonesStatus);
-            updateZonesUI(zonesStatus);
+            if (Array.isArray(zonesStatus)) {
+                updateZonesUI(zonesStatus);
+            } else {
+                console.error("Formato di risposta non valido per lo stato delle zone");
+            }
         })
         .catch(error => {
             console.error('Errore nel recupero dello stato delle zone:', error);
+            // Non aggiorniamo l'UI in caso di errore per evitare visualizzazioni errate
         });
 }
 

@@ -27,8 +27,8 @@ function startProgramStatusPolling() {
     // Esegui subito
     fetchProgramState();
     
-    // Imposta l'intervallo a 3 secondi
-    programStatusInterval = setInterval(fetchProgramState, 3000);
+    // Imposta l'intervallo a 5 secondi (invece di 3)
+    programStatusInterval = setInterval(fetchProgramState, 5000);
     console.log("Polling dello stato dei programmi avviato");
 }
 
@@ -46,18 +46,23 @@ function cleanupViewProgramsPage() {
     stopProgramStatusPolling();
 }
 
-// Ottiene lo stato del programma corrente
+// Ottiene lo stato del programma corrente con gestione errori migliorata
 function fetchProgramState() {
     fetch('/get_program_state')
         .then(response => {
-            if (!response.ok) throw new Error('Errore nel recupero dello stato del programma');
+            if (!response.ok) throw new Error(`Errore HTTP: ${response.status}`);
             return response.json();
         })
         .then(state => {
-            updateProgramsUI(state);
+            if (state && typeof state === 'object') {
+                updateProgramsUI(state);
+            } else {
+                console.error("Formato di risposta non valido per lo stato del programma");
+            }
         })
         .catch(error => {
             console.error('Errore nel recupero dello stato del programma:', error);
+            // Non aggiorniamo l'UI in caso di errore per evitare visualizzazioni errate
         });
 }
 
@@ -287,12 +292,12 @@ function renderProgramCards(programs, state) {
                     <button class="btn btn-start ${isActive ? 'disabled' : ''}" 
                             onclick="startProgram('${programId}')" 
                             ${isActive ? 'disabled' : ''}>
-                        <span class="btn-icon">▶</span> Avvia ora
+                        <span class="btn-icon">▶</span> ON
                     </button>
                     <button class="btn btn-stop ${!isActive ? 'disabled' : ''}" 
                             onclick="stopProgram()" 
                             ${!isActive ? 'disabled' : ''}>
-                        <span class="btn-icon">■</span> Stop
+                        <span class="btn-icon">■</span> OFF
                     </button>
                 </div>
                 <div class="action-row">

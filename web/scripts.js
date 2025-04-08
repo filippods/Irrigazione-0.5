@@ -96,7 +96,8 @@ function loadUserData(callback) {
 function loadPage(pageName, callback) {
     if (isLoadingPage) return;
     isLoadingPage = true;
-    
+    closeMenu();
+	
     if (pageName === 'create_program.html') {
         // Rimuovi sempre l'ID quando vai alla pagina di creazione
         localStorage.removeItem('editProgramId');
@@ -239,17 +240,24 @@ function updateActiveMenuItem(pageName) {
     });
 }
 
-// Funzioni per il menu
+// Versione corretta per scripts.js - solo la parte che necessita di correzione
+
 function toggleMenu() {
     const menu = document.getElementById('menu');
-    const overlay = document.getElementById('overlay');
+    const overlay = document.getElementById('menu-overlay');
+    
+    if (!menu || !overlay) return;
+    
     menu.classList.toggle('active');
     overlay.classList.toggle('active');
 }
 
 function closeMenu() {
     const menu = document.getElementById('menu');
-    const overlay = document.getElementById('overlay');
+    const overlay = document.getElementById('menu-overlay');
+    
+    if (!menu || !overlay) return;
+    
     menu.classList.remove('active');
     overlay.classList.remove('active');
 }

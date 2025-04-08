@@ -33,14 +33,21 @@ def load_program_state():
     global program_running, current_program_id
     try:
         with open(PROGRAM_STATE_FILE, 'r') as f:
+            content = f.read().strip()
+            if not content:
+                raise ValueError("File vuoto")
+                
             state = ujson.load(f)
+            if not isinstance(state, dict):
+                raise ValueError("Stato non valido")
+                
             program_running = state.get('program_running', False)
             current_program_id = state.get('current_program_id', None)
             print(f"Stato del programma caricato: program_running={program_running}, current_program_id={current_program_id}")
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
         # Resetta lo stato se il file non esiste, è vuoto o c'è un errore
-        log_event("Nessuno stato salvato trovato o stato non valido, avvio da zero", "INFO")
-        print("Nessuno stato salvato trovato o stato non valido, avvio da zero.")
+        log_event(f"Errore nel caricamento dello stato del programma: {e}. Inizializzazione nuovo stato.", "INFO")
+        print(f"Errore nel caricamento dello stato del programma: {e}. Inizializzazione nuovo stato.")
         program_running = False
         current_program_id = None
         save_program_state()  # Salva il nuovo stato inizializzato
