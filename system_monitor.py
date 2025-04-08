@@ -34,6 +34,10 @@ CONSECUTIVE_FAILURES = {
     'wifi_connection': 0
 }
 
+# Contatore per il riavvio automatico del server
+server_restart_attempts = 0
+last_server_restart = 0
+
 # Metriche del sistema
 system_metrics = {
     'uptime': 0,  # Tempo di attività in secondi
@@ -54,6 +58,8 @@ async def check_web_server():
     Returns:
         boolean: True se il server è attivo, False altrimenti
     """
+    global server_restart_attempts, last_server_restart
+    
     try:
         # Verifica se il server risponde a una richiesta locale
         addr_info = socket.getaddrinfo('localhost', 80)
@@ -71,6 +77,7 @@ async def check_web_server():
             if b'HTTP' in response:
                 HEALTH_INDICATORS['web_server'] = True
                 CONSECUTIVE_FAILURES['web_server'] = 0
+                server_restart_attempts = 0  # Reset del contatore se il server risponde
                 return True
         except Exception as e:
             log_event(f"Il web server non risponde: {e}", "WARNING")
@@ -84,12 +91,14 @@ async def check_web_server():
     HEALTH_INDICATORS['web_server'] = False
     
     # Tenta il riavvio del server se ci sono troppi fallimenti consecutivi
+    current_time = time.time()
     if CONSECUTIVE_FAILURES['web_server'] >= 3:
-        log_event(f"Tentativo di riavvio del web server dopo {CONSECUTIVE_FAILURES['web_server']} fallimenti", "WARNING")
-        
-        # Impostiamo un limite al numero di riavvii per evitare cicli infiniti
-        if system_metrics['server_restarts'] < MAX_SERVER_RESTARTS:
+        # Previene riavvii troppo frequenti (almeno 2 minuti tra riavvii)
+        if current_time - last_server_restart > 120 and server_restart_attempts < MAX_SERVER_RESTARTS:
+            log_event(f"Tentativo di riavvio del web server dopo {CONSECUTIVE_FAILURES['web_server']} fallimenti", "WARNING")
+            server_restart_attempts += 1
             system_metrics['server_restarts'] += 1
+            last_server_restart = current_time
             
             # Tenta di riavviare il server
             try:
@@ -101,15 +110,35 @@ async def check_web_server():
                 log_event(f"Errore nel riavvio del web server: {e}", "ERROR")
                 print(f"Errore nel riavvio del web server: {e}")
         else:
-            log_event(f"Raggiunto il numero massimo di riavvii del server ({MAX_SERVER_RESTARTS})", "ERROR")
+            # Log più dettagliato sul perché non riavviamo il server
+            if current_time - last_server_restart <= 120:
+                log_event("Riavvio del web server rinviato: ultimo riavvio troppo recente", "INFO")
+            elif server_restart_attempts >= MAX_SERVER_RESTARTS:
+                log_event(f"Raggiunto il numero massimo di riavvii del server ({MAX_SERVER_RESTARTS})", "ERROR")
+                
+                # Se abbiamo raggiunto il numero massimo di riavvii, riavvia tutto il sistema
+                if server_restart_attempts == MAX_SERVER_RESTARTS:
+                    log_event("Troppi tentativi falliti di riavvio del server, riavvio del sistema in 10 secondi", "ERROR")
+                    asyncio.create_task(_delayed_system_reset(10))
+                    server_restart_attempts += 1  # Incrementiamo per non ripetere questo log
     
     return False
+
+async def _delayed_system_reset(seconds):
+    """
+    Riavvia il sistema dopo un ritardo specificato.
+    """
+    await asyncio.sleep(seconds)
+    machine.reset()
 
 async def restart_web_server():
     """
     Riavvia il web server.
     """
     try:
+        # Forza una garbage collection prima di riavviare
+        gc.collect()
+        
         # Ferma il server corrente se possibile
         if hasattr(app, 'server') and app.server:
             try:
@@ -292,6 +321,9 @@ async def check_programs_state():
         from program_state import program_running, current_program_id
         from program_manager import load_programs
         
+        # Ricarica lo stato del programma per essere sicuri
+        load_program_state()
+        
         # Se c'è un programma in esecuzione, verifica che esista
         if program_running and current_program_id:
             programs = load_programs()
@@ -370,8 +402,12 @@ async def diagnostic_loop():
             log_event(f"Errore grave nel loop di diagnostica: {e}", "ERROR")
             print(f"Errore grave nel loop di diagnostica: {e}")
         
-        # Attendi fino al prossimo controllo
-        await asyncio.sleep(CHECK_INTERVAL)
+        # Attendi fino al prossimo controllo - usiamo un approccio più reattivo
+        # Controlla più frequentemente se ci sono problemi noti
+        if any(not status for status in HEALTH_INDICATORS.values()):
+            await asyncio.sleep(CHECK_INTERVAL // 2)  # Controlla più spesso se ci sono problemi
+        else:
+            await asyncio.sleep(CHECK_INTERVAL)
 
 async def start_diagnostics():
     """

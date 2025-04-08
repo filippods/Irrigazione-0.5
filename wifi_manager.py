@@ -19,6 +19,9 @@ AP_SSID_DEFAULT = "IrrigationSystem"
 AP_PASSWORD_DEFAULT = "12345678"
 WIFI_SCAN_FILE = '/data/wifi_scan.json'
 
+# Traccia se abbiamo già avvisato della mancanza di mDNS
+mdns_warning_shown = False
+
 def reset_wifi_module():
     """
     Disattiva e riattiva il modulo WiFi per forzare un reset completo.
@@ -162,7 +165,7 @@ def start_access_point(ssid=None, password=None):
             auth_mode = "Aperto"
 
         log_event(f"Access Point attivato con SSID: '{ssid}', sicurezza: {auth_mode}", "INFO")
-        print(f"Access Point attivato con SSID: '{ssid}', sicurezza {'WPA2' if password and len(password) >= 8 else 'Nessuna'}")
+        print(f"Access Point attivato con SSID: '{ssid}', sicurezza {auth_mode}")
         return True
     except Exception as e:
         log_event(f"Errore durante l'attivazione dell'Access Point: {e}", "ERROR")
@@ -176,7 +179,8 @@ def start_access_point(ssid=None, password=None):
 def setup_mdns(hostname="irrigation"):
     """
     Configura mDNS per l'accesso tramite hostname.local.
-    Modificata per ridurre messaggi di errore ripetitivi.
+    Modificata per ridurre messaggi di errore ripetitivi e per gestire meglio
+    i diversi tentativi di implementazione mDNS.
     
     Args:
         hostname: Nome host da utilizzare (default: "irrigation")
@@ -184,42 +188,94 @@ def setup_mdns(hostname="irrigation"):
     Returns:
         boolean: True se l'inizializzazione è riuscita, False altrimenti
     """
+    global mdns_warning_shown
+    
     try:
-        # Messaggio iniziale
-        print(f"Tentativo di configurazione mDNS con hostname: {hostname}.local")
+        # Messaggio iniziale - solo al primo tentativo
+        if not mdns_warning_shown:
+            print(f"Tentativo di configurazione mDNS con hostname: {hostname}.local")
         
-        # Implementazione per ESP-IDF
-        try:
-            import esp
-            if hasattr(esp, 'mdns_init'):
-                esp.mdns_init()
-                esp.mdns_add_service(hostname, "_http", "_tcp", 80)
-                log_event(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)", "INFO")
-                print(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)")
-                return True
-        except (ImportError, AttributeError):
-            # Non registriamo errori nei log per moduli mancanti
-            pass
+        # Lista di tentativi di implementazione mDNS - in ordine di preferenza
+        mdns_implementations = [
+            # ESP-IDF (più recente)
+            lambda: __try_esp_idf_mdns(hostname),
             
-        # Implementazione per moduli network con mDNS incorporato
-        try:
-            import network
-            if hasattr(network, 'mDNS'):
-                network.mDNS.init(hostname)
-                log_event(f"mDNS avviato con hostname: {hostname}.local (network)", "INFO")
-                print(f"mDNS avviato con hostname: {hostname}.local (network)")
-                return True
-        except (ImportError, AttributeError):
-            # Non registriamo errori nei log per moduli mancanti
-            pass
+            # Network integrato
+            lambda: __try_network_mdns(hostname),
             
-        # Se arriviamo qui, nessuna implementazione mDNS ha funzionato
-        log_event("Nessun modulo mDNS disponibile, accesso tramite IP", "WARNING")
-        print("Nessun modulo mDNS disponibile. Accesso tramite IP richiesto.")
+            # Implementazione diretta socket
+            lambda: __try_socket_mdns(hostname),
+            
+            # Micropython-mdns (se disponibile)
+            lambda: __try_micropython_mdns(hostname)
+        ]
+        
+        # Prova ogni implementazione
+        for implementation in mdns_implementations:
+            try:
+                if implementation():
+                    return True
+            except Exception:
+                # Ignora silenziosamente gli errori di implementazione
+                pass
+            
+        # Se arriviamo qui, nessuna implementazione ha funzionato
+        if not mdns_warning_shown:
+            log_event("Nessun modulo mDNS disponibile, accesso tramite IP", "WARNING")
+            print("Nessun modulo mDNS disponibile. Accesso tramite IP richiesto.")
+            # Segna che abbiamo già mostrato l'avviso una volta
+            mdns_warning_shown = True
+            
         return False
     except Exception as e:
-        log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
-        print(f"Errore durante l'inizializzazione di mDNS: {e}")
+        if not mdns_warning_shown:
+            log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
+            print(f"Errore durante l'inizializzazione di mDNS: {e}")
+            mdns_warning_shown = True
+        return False
+
+def __try_esp_idf_mdns(hostname):
+    """Tenta di utilizzare l'implementazione ESP-IDF di mDNS"""
+    import esp
+    if hasattr(esp, 'mdns_init'):
+        esp.mdns_init()
+        esp.mdns_add_service(hostname, "_http", "_tcp", 80)
+        log_event(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)", "INFO")
+        print(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)")
+        return True
+    return False
+
+def __try_network_mdns(hostname):
+    """Tenta di utilizzare l'implementazione integrata nel modulo network"""
+    import network
+    if hasattr(network, 'mDNS'):
+        network.mDNS.init(hostname)
+        log_event(f"mDNS avviato con hostname: {hostname}.local (network)", "INFO")
+        print(f"mDNS avviato con hostname: {hostname}.local (network)")
+        return True
+    return False
+
+def __try_socket_mdns(hostname):
+    """Tenta un'implementazione basata su socket se disponibile"""
+    try:
+        import mdns.mdns as mdns_mod
+        mdns_server = mdns_mod.MDNS(hostname)
+        mdns_server.start()
+        log_event(f"mDNS avviato con hostname: {hostname}.local (socket)", "INFO")
+        print(f"mDNS avviato con hostname: {hostname}.local (socket)")
+        return True
+    except ImportError:
+        return False
+
+def __try_micropython_mdns(hostname):
+    """Tenta di utilizzare la libreria micropython-mdns se installata"""
+    try:
+        import mdns
+        mdns.start(hostname)
+        log_event(f"mDNS avviato con hostname: {hostname}.local (micropython-mdns)", "INFO")
+        print(f"mDNS avviato con hostname: {hostname}.local (micropython-mdns)")
+        return True
+    except ImportError:
         return False
 
 def initialize_network():

@@ -51,6 +51,10 @@ Request.max_content_length = 32 * 1024  # 32KB per le richieste
 Request.max_body_length = 16 * 1024     # 16KB per il corpo
 Request.max_readline = 1024             # 1KB per riga di richiesta
 
+# Variabili per monitorare la salute del server
+server_timeout_counter = 0
+last_server_restart = 0
+
 def json_response(data, status_code=200):
     """
     Helper per creare risposte JSON standardizzate.
@@ -97,9 +101,14 @@ def with_gc(route_handler):
     """
     async def async_wrapper(*args, **kwargs):
         try:
+            # Garbage collection preventiva prima della chiamata
+            gc.collect()
+            
             result = route_handler(*args, **kwargs)
             if hasattr(result, 'send') and hasattr(result, 'throw'):
                 result = await result
+                
+            # Garbage collection dopo la chiamata
             gc.collect()
             return result
         except Exception as e:
@@ -211,8 +220,8 @@ def clear_wifi_scan(request):
 async def get_zones_status_endpoint(request):
     """API per ottenere lo stato delle zone."""
     try:
-        # Breve pausa per prevenire polling troppo frequenti
-        await asyncio.sleep(0.1)
+        # Breve pausa per prevenire polling troppo frequenti - ridotto per maggiore reattività
+        await asyncio.sleep(0.05)
         
         zones_status = get_zones_status()
         return json_response(zones_status)
@@ -413,7 +422,18 @@ def stop_program_route(request):
     try:
         log_event("Richiesta di interruzione del programma ricevuta", "INFO")
         print("Richiesta di interruzione ricevuta.")
+        
+        # Forza la garbage collection prima di eseguire un'operazione critica
+        gc.collect()
+        
+        # Ricarica lo stato per assicurarsi di avere i dati più recenti
+        load_program_state()
+        
         success = stop_program()
+        
+        # Forza la garbage collection dopo l'operazione critica
+        gc.collect()
+        
         return json_response({'success': success, 'message': 'Programma interrotto'})
     except Exception as e:
         log_event(f"Errore nell'arresto del programma: {e}", "ERROR")
@@ -640,7 +660,7 @@ async def get_program_state(request):
     """API per ottenere lo stato del programma corrente."""
     try:
         # Breve pausa per prevenire polling troppo frequenti
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)  # Ridotto da 0.1 a 0.05 per maggiore reattività
         
         # Ricarichiamo lo stato per essere sicuri di avere dati aggiornati
         try:
@@ -650,6 +670,8 @@ async def get_program_state(request):
             # In caso di errore, invia comunque una risposta predefinita sicura
             return json_response({'program_running': False, 'current_program_id': None})
             
+        # Costruiamo lo stato con i valori globali effettivi, non con quelli memorizzati nel file
+        # che potrebbero essere inconsistenti
         state = {
             'program_running': program_running,
             'current_program_id': current_program_id
@@ -689,7 +711,7 @@ async def start_program_route(request):
             log_event("Impossibile avviare il programma: un altro programma è già in esecuzione", "WARNING")
             return json_response({'success': False, 'error': 'Un altro programma è già in esecuzione'}, 400)
 
-        # Avvia il programma manualmente
+        # Avvia il programma manualmente - con await per evitare race condition
         success = await execute_program(program, manual=True)
         
         if success:
@@ -903,6 +925,8 @@ async def start_web_server():
     """
     Avvia il server web.
     """
+    global server_timeout_counter, last_server_restart
+    
     try:
         print("Avvio del server web.")
         log_event("Avvio del server web", "INFO")
@@ -917,8 +941,16 @@ async def start_web_server():
         Request.max_content_length = 32 * 1024  # Limitare la dimensione massima della richiesta
         Request.max_readline = 1024  # Ridurre la dimensione massima delle righe di richiesta
         
+        # Reset del contatore di timeout al riavvio
+        server_timeout_counter = 0
+        last_server_restart = time.time()
+        
         # Avvia il server sulla porta 80
         await app.start_server(host='0.0.0.0', port=80)
     except Exception as e:
         log_event(f"Errore durante l'avvio del server web: {e}", "ERROR")
         print(f"Errore durante l'avvio del server web: {e}")
+        
+        # In caso di errore durante l'avvio, attendi e riprova
+        await asyncio.sleep(5)
+        asyncio.create_task(start_web_server())

@@ -241,6 +241,8 @@ async def execute_program(program, manual=False):
     """
     # Ricarica lo stato per assicurarsi di avere dati aggiornati
     load_program_state()
+    
+    # Riferimento esplicito alle variabili globali
     global program_running, current_program_id
     
     if program_running:
@@ -271,21 +273,33 @@ async def execute_program(program, manual=False):
         log_event(f"Eccezione durante l'arresto di tutte le zone: {e}", "ERROR")
         return False
 
-    program_id = str(program.get('id', '0'))  # Assicura che l'ID sia una stringa
+    # Ottieni l'ID del programma e assicurati che sia una stringa
+    program_id = str(program.get('id', '0'))
     
+    # Imposta lo stato del programma come in esecuzione
     program_running = True
     current_program_id = program_id
+    
+    # Salva lo stato aggiornato su file
     save_program_state()
     
+    # Verifica che lo stato sia stato aggiornato correttamente
+    print(f"Programma avviato: program_running={program_running}, current_program_id={current_program_id}")
+    
+    # Altri log
     program_name = program.get('name', 'Senza nome')
     log_event(f"Avvio del programma: {program_name} (ID: {program_id})", "INFO")
 
+    # Carica le impostazioni utente per il ritardo di attivazione
     settings = load_user_settings()
     activation_delay = settings.get('activation_delay', 0)
     
     successful_execution = False
     try:
         for i, step in enumerate(program.get('steps', [])):
+            # Verifica periodicamente se il programma è stato interrotto
+            load_program_state()  # Ricarica lo stato prima di ogni verifica
+            
             if not program_running:
                 log_event("Programma interrotto dall'utente.", "INFO")
                 print("Programma interrotto dall'utente.")
@@ -309,6 +323,10 @@ async def execute_program(program, manual=False):
                 
             # Aspetta per la durata specificata
             for _ in range(duration * 60):
+                # Ricarica periodicamente lo stato per verificare interruzioni
+                if _ % 10 == 0:  # Ogni 10 secondi
+                    load_program_state()
+                    
                 if not program_running:
                     break
                 await asyncio.sleep(1)
@@ -326,6 +344,10 @@ async def execute_program(program, manual=False):
             if activation_delay > 0 and i < len(program.get('steps', [])) - 1:
                 log_event(f"Attesa di {activation_delay} minuti prima della prossima zona.", "INFO")
                 for _ in range(activation_delay * 60):
+                    # Ricarica periodicamente lo stato per verificare interruzioni
+                    if _ % 10 == 0:  # Ogni 10 secondi
+                        load_program_state()
+                        
                     if not program_running:
                         break
                     await asyncio.sleep(1)
@@ -344,9 +366,11 @@ async def execute_program(program, manual=False):
     finally:
         # Assicurati che queste operazioni vengano sempre eseguite, anche in caso di errore
         try:
+            # Aggiorna lo stato del programma
             program_running = False
             current_program_id = None
             save_program_state()
+            
             # Assicurati che tutte le zone siano disattivate, anche in caso di errore
             stop_all_zones()
         except Exception as final_e:
