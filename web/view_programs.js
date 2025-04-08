@@ -4,7 +4,6 @@
 var programStatusInterval = null;
 var programsData = {};
 var zoneNameMap = {};
-var globalAutomationEnabled = false;
 
 // Inizializza la pagina
 function initializeViewProgramsPage() {
@@ -21,70 +20,6 @@ function initializeViewProgramsPage() {
     
     // Esponi la funzione di aggiornamento stato programma globalmente
     window.fetchProgramState = fetchProgramState;
-}
-
-// Aggiunge l'indicatore di stato automazione globale nella pagina
-function addGlobalAutomationStatus(enabled) {
-    globalAutomationEnabled = enabled;
-    const pageTitle = document.querySelector('.page-title');
-    
-    if (!pageTitle) return;
-    
-    // Rimuovi eventuali indicatori esistenti
-    const existingStatus = pageTitle.querySelector('.auto-status');
-    if (existingStatus) {
-        existingStatus.remove();
-    }
-    
-    // Crea il nuovo indicatore
-    const statusElement = document.createElement('div');
-    statusElement.className = enabled ? 'auto-status on' : 'auto-status off';
-    statusElement.innerHTML = `
-        <i></i>
-        <span>Automazione globale: ${enabled ? 'Attiva' : 'Disattivata'}</span>
-    `;
-    
-    // Aggiungi il pulsante per cambiare lo stato
-    statusElement.addEventListener('click', toggleGlobalAutomation);
-    statusElement.style.cursor = 'pointer';
-    
-    // Aggiungi un hint
-    statusElement.title = 'Clicca per cambiare';
-    
-    pageTitle.appendChild(statusElement);
-}
-
-// Funzione per attivare/disattivare l'automazione globale
-function toggleGlobalAutomation() {
-    // Inverti lo stato corrente
-    const newState = !globalAutomationEnabled;
-    
-    fetch('/toggle_automatic_programs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enable: newState })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            if (typeof showToast === 'function') {
-                showToast(`Automazione globale ${newState ? 'attivata' : 'disattivata'} con successo`, 'success');
-            }
-            
-            // Aggiorna l'indicatore
-            addGlobalAutomationStatus(newState);
-        } else {
-            if (typeof showToast === 'function') {
-                showToast(`Errore: ${data.error || 'Errore sconosciuto'}`, 'error');
-            }
-        }
-    })
-    .catch(error => {
-        console.error('Errore:', error);
-        if (typeof showToast === 'function') {
-            showToast('Errore di rete', 'error');
-        }
-    });
 }
 
 // Avvia il polling dello stato dei programmi
@@ -218,10 +153,6 @@ function loadUserSettingsAndPrograms() {
     ])
     .then(([settings, programs, state]) => {
         const loadedUserSettings = settings;
-        
-        // Carica lo stato di automazione globale
-        const globalAutomation = settings.automatic_programs_enabled || false;
-        addGlobalAutomationStatus(globalAutomation);
         
         // Crea una mappa di ID zona -> nome zona
         zoneNameMap = {};

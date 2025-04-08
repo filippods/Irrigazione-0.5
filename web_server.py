@@ -647,6 +647,7 @@ async def get_program_state(request):
             load_program_state()
         except Exception as e:
             log_event(f"Errore durante il caricamento dello stato del programma: {e}", "ERROR")
+            # In caso di errore, invia comunque una risposta predefinita sicura
             return json_response({'program_running': False, 'current_program_id': None})
             
         state = {
@@ -657,6 +658,7 @@ async def get_program_state(request):
     except Exception as e:
         log_event(f"Errore durante la risposta dello stato del programma: {e}", "ERROR")
         print(f"Errore durante la risposta dello stato del programma: {e}")
+        # Fornisci sempre una risposta predefinita sicura
         return json_response({'program_running': False, 'current_program_id': None})
 
 @app.route('/start_program', methods=['POST'])

@@ -321,65 +321,6 @@
             font-size: 16px;
         }
 
-        .auto-control {
-            display: flex;
-            padding: 15px 20px;
-            background-color: #f0f0f0;
-            border-top: 1px solid #ddd;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .auto-switch {
-            display: flex;
-            border-radius: 24px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .auto-btn {
-            flex: 1;
-            padding: 8px 16px;
-            border: none;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-align: center;
-        }
-
-        .auto-btn.on {
-            background-color: #00cc66;
-            color: white;
-        }
-
-        .auto-btn.on:hover {
-            background-color: #00b359;
-        }
-
-        .auto-btn.off {
-            background-color: #ff9900;
-            color: white;
-        }
-
-        .auto-btn.off:hover {
-            background-color: #e68a00;
-        }
-
-        .auto-btn.active {
-            position: relative;
-        }
-
-        .auto-btn.active::after {
-            content: '';
-            position: absolute;
-            width: 100%;
-            height: 4px;
-            bottom: 0;
-            left: 0;
-            background-color: rgba(255, 255, 255, 0.6);
-        }
-
         .empty-state {
             grid-column: 1 / -1;
             text-align: center;
@@ -417,48 +358,6 @@
             color: #333;
             border-bottom: 2px solid #0099ff;
             padding-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .page-title .auto-status {
-            font-size: 14px;
-            font-weight: normal;
-            padding: 4px 10px;
-            border-radius: 16px;
-            display: inline-flex;
-            align-items: center;
-            margin-top: 5px;
-        }
-
-        .page-title .auto-status.on {
-            background-color: #e6fff5;
-            color: #00b359;
-            border: 1px solid #b3e6cc;
-        }
-
-        .page-title .auto-status.off {
-            background-color: #fff2e6;
-            color: #e68a00;
-            border: 1px solid #ffcd99;
-        }
-
-        .page-title .auto-status i {
-            margin-right: 5px;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .page-title .auto-status.on i {
-            background-color: #00cc66;
-        }
-
-        .page-title .auto-status.off i {
-            background-color: #ff9900;
         }
 
         /* Loader */
@@ -519,15 +418,6 @@
             .programs-container {
                 grid-template-columns: 1fr;
                 gap: 15px;
-            }
-            
-            .page-title {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .page-title .auto-status {
-                margin-top: 10px;
             }
             
             .info-row {
