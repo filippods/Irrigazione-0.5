@@ -6,9 +6,9 @@ import time
 import machine
 from machine import Pin
 import uasyncio as asyncio
-from program_state import program_running
 from settings_manager import load_user_settings
 from log_manager import log_event
+from program_state import program_running
 
 # Variabili globali
 active_zones = {}
@@ -149,14 +149,14 @@ def start_zone(zone_id, duration):
     Returns:
         boolean: True se l'operazione è riuscita, False altrimenti
     """
-    global active_zones, zone_pins, safety_relay, program_running
+    global active_zones, zone_pins, safety_relay
     
     # Converti in interi
     zone_id = int(zone_id)
     duration = int(duration)
     
-    # Verifica se un programma è in esecuzione automatica
-    from program_state import program_running
+    # Verifica se un programma è in esecuzione
+    # Nota: Usiamo program_running importato direttamente all'inizio del file
     if program_running:
         log_event(f"Impossibile avviare la zona {zone_id}: un programma è già in esecuzione", "WARNING")
         print(f"Impossibile avviare la zona {zone_id}: un programma è già in esecuzione.")
@@ -210,6 +210,7 @@ def start_zone(zone_id, duration):
         try:
             active_zones[zone_id]['task'].cancel()
         except Exception as e:
+            log_event(f"Errore cancellazione task precedente: {e}", "WARNING")
             print(f"Errore cancellazione task precedente: {e}")
 
     # Crea un nuovo task per lo spegnimento automatico

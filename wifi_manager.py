@@ -173,6 +173,125 @@ def start_access_point(ssid=None, password=None):
             pass
         return False
 
+def setup_mdns(hostname="irrigation"):
+    """
+    Configura mDNS per l'accesso tramite hostname.local.
+    Implementazione ottimizzata per ESP32 con gestione specifica per vari moduli mDNS.
+    
+    Args:
+        hostname: Nome host da utilizzare (default: "irrigation")
+        
+    Returns:
+        boolean: True se l'inizializzazione è riuscita, False altrimenti
+    """
+    try:
+        # Evita errori sul bus i2c disattivando temporaneamente i2c
+        # (problema noto con alcune versioni del firmware ESP32)
+        try:
+            from machine import Pin, I2C
+            i2c_instances = []
+            for i in range(2):  # ESP32 ha 2 periferiche I2C
+                try:
+                    i2c = I2C(i)
+                    i2c.deinit()  # Disattiva temporaneamente
+                    i2c_instances.append((i, i2c))
+                except:
+                    pass
+        except:
+            i2c_instances = []
+            
+        # Implementazione per ESP-IDF
+        try:
+            import esp
+            if hasattr(esp, 'mdns_init'):
+                esp.mdns_init()
+                esp.mdns_add_service(hostname, "_http", "_tcp", 80)
+                log_event(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)", "INFO")
+                print(f"mDNS avviato con hostname: {hostname}.local (ESP-IDF)")
+                
+                # Reinizializza i2c se necessario
+                for i, i2c in i2c_instances:
+                    try:
+                        i2c.init()
+                    except:
+                        pass
+                        
+                return True
+        except (ImportError, AttributeError, Exception) as e:
+            log_event(f"Errore con mdns ESP-IDF: {e}", "WARNING")
+            
+        # Implementazione per moduli network con mDNS incorporato
+        try:
+            import network
+            if hasattr(network, 'mDNS'):
+                network.mDNS.init(hostname)
+                log_event(f"mDNS avviato con hostname: {hostname}.local (network)", "INFO")
+                print(f"mDNS avviato con hostname: {hostname}.local (network)")
+                
+                # Reinizializza i2c se necessario
+                for i, i2c in i2c_instances:
+                    try:
+                        i2c.init()
+                    except:
+                        pass
+                        
+                return True
+        except (ImportError, AttributeError, Exception) as e:
+            log_event(f"Errore con mdns network: {e}", "WARNING")
+            
+        # Implementazione per modulo mdns standard
+        try:
+            import mdns
+            mdns.start(hostname)
+            log_event(f"mDNS avviato con hostname: {hostname}.local (standard)", "INFO")
+            print(f"mDNS avviato con hostname: {hostname}.local (standard)")
+            
+            # Reinizializza i2c se necessario
+            for i, i2c in i2c_instances:
+                try:
+                    i2c.init()
+                except:
+                    pass
+                    
+            return True
+        except (ImportError, Exception) as e:
+            log_event(f"Errore con mdns standard: {e}", "WARNING")
+            
+        # Implementazione per modulo umdns per MicroPython
+        try:
+            import umdns
+            umdns.start(hostname)
+            log_event(f"mDNS avviato con hostname: {hostname}.local (umdns)", "INFO")
+            print(f"mDNS avviato con hostname: {hostname}.local (umdns)")
+            
+            # Reinizializza i2c se necessario
+            for i, i2c in i2c_instances:
+                try:
+                    i2c.init()
+                except:
+                    pass
+                    
+            return True
+        except (ImportError, Exception) as e:
+            log_event(f"Errore con umdns: {e}", "WARNING")
+        
+        # Se arriviamo qui, nessuna implementazione mDNS ha funzionato
+        log_event("Nessun modulo mDNS disponibile, accesso tramite IP", "WARNING")
+        print("Nessun modulo mDNS disponibile. Accesso tramite IP richiesto.")
+        
+        # Reinizializza i2c se necessario
+        for i, i2c in i2c_instances:
+            try:
+                i2c.init()
+            except:
+                pass
+                
+        return False
+    except Exception as e:
+        log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
+        print(f"Errore durante l'inizializzazione di mDNS: {e}")
+        return False
+
 def initialize_network():
     """
     Inizializza la rete WiFi (client o AP) in base alle impostazioni.
@@ -201,8 +320,16 @@ def initialize_network():
                 log_event("Modalità client attivata con successo", "INFO")
                 print("Modalità client attivata con successo.")
                 
-                # Configura mDNS per accesso facilitato
-                setup_mdns()
+                # Configura mDNS per accesso facilitato - tentativi multipli
+                mdns_success = False
+                for attempt in range(3):
+                    if setup_mdns():
+                        mdns_success = True
+                        break
+                    time.sleep(1)
+                
+                if not mdns_success:
+                    log_event("Non è stato possibile configurare mDNS dopo 3 tentativi", "WARNING")
                 
                 return True
             else:
@@ -220,57 +347,18 @@ def initialize_network():
     success = start_access_point(ap_ssid, ap_password)
     
     # Configura mDNS anche in modalità AP
-    setup_mdns()
+    mdns_success = False
+    for attempt in range(3):
+        if setup_mdns():
+            mdns_success = True
+            break
+        time.sleep(1)
+    
+    if not mdns_success:
+        log_event("Non è stato possibile configurare mDNS in modalità AP dopo 3 tentativi", "WARNING")
     
     return success
 
-# Replace the setup_mdns function in wifi_manager.py
-
-def setup_mdns(hostname="irrigation"):
-    """
-    Configura mDNS per l'accesso tramite hostname.local.
-    
-    Args:
-        hostname: Nome host da utilizzare (default: "irrigation")
-        
-    Returns:
-        boolean: True se l'inizializzazione è riuscita, False altrimenti
-    """
-    try:
-        # Tenta di importare il modulo mDNS appropriato in base alla piattaforma
-        try:
-            import mdns
-            mdns.start(hostname)
-            log_event(f"mDNS avviato con hostname: {hostname}.local (standard)", "INFO")
-            return True
-        except ImportError:
-            try:
-                import umdns
-                umdns.start(hostname)
-                log_event(f"mDNS avviato con hostname: {hostname}.local (umdns)", "INFO")
-                return True
-            except ImportError:
-                try:
-                    import esp
-                    # Check if the esp module has the mdns_init attribute
-                    if hasattr(esp, 'mdns_init'):
-                        esp.mdns_init()
-                        esp.mdns_add_service(hostname, "_http", "_tcp", 80)
-                        log_event(f"mDNS avviato con hostname: {hostname}.local (esp)", "INFO")
-                        return True
-                    else:
-                        # If attribute missing, fail gracefully
-                        log_event("Modulo ESP presente ma mdns_init non disponibile", "WARNING")
-                        raise AttributeError("esp module doesn't support mdns_init")
-                except (ImportError, AttributeError):
-                    log_event("Modulo mDNS non disponibile, accesso tramite IP", "WARNING")
-                    print("Modulo mDNS non disponibile. Accesso tramite IP richiesto.")
-                    return False
-    except Exception as e:
-        log_event(f"Errore durante l'inizializzazione di mDNS: {e}", "ERROR")
-        print(f"Errore durante l'inizializzazione di mDNS: {e}")
-        return False
-        
 async def retry_client_connection():
     """
     Task asincrono che verifica periodicamente la connessione WiFi client e tenta di riconnettersi se necessario.
@@ -286,6 +374,7 @@ async def retry_client_connection():
     last_attempt_time = 0
     reconnection_tries = 0
     ap_failover_activated = False
+    mdns_configured = False
 
     while True:
         try:
@@ -346,8 +435,13 @@ async def retry_client_connection():
                                     log_event("Access Point di fallback disattivato", "INFO")
                                     print("Access Point di fallback disattivato")
                                     
-                                # Configura mDNS dopo la riconnessione
-                                setup_mdns()
+                                # Riconfigura mDNS dopo la riconnessione
+                                if not mdns_configured:
+                                    if setup_mdns():
+                                        mdns_configured = True
+                                    else:
+                                        # Riprova più tardi
+                                        mdns_configured = False
                             else:
                                 # Connessione fallita, attiva l'AP come fallback se non è già attivo
                                 if not ap_failover_activated:
@@ -391,6 +485,14 @@ async def retry_client_connection():
                         print("Access Point di fallback disattivato")
                         ap_failover_activated = False
                     
+                    # Assicurati che mDNS sia configurato
+                    if not mdns_configured:
+                        if setup_mdns():
+                            mdns_configured = True
+                        else:
+                            # Riprova più tardi
+                            mdns_configured = False
+                    
                     # Aspetta un po' prima del prossimo controllo
                     await asyncio.sleep(30)
             else:
@@ -408,6 +510,14 @@ async def retry_client_connection():
                     ap_ssid = settings.get('ap', {}).get('ssid', AP_SSID_DEFAULT)
                     ap_password = settings.get('ap', {}).get('password', AP_PASSWORD_DEFAULT)
                     start_access_point(ap_ssid, ap_password)
+                
+                # Assicurati che mDNS sia configurato
+                if not mdns_configured:
+                    if setup_mdns():
+                        mdns_configured = True
+                    else:
+                        # Riprova più tardi
+                        mdns_configured = False
                 
                 # Aspetta prima del prossimo controllo
                 await asyncio.sleep(30)

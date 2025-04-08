@@ -173,8 +173,6 @@ def is_program_active_in_current_month(program):
     program_months = [months_map[month] for month in program.get('months', []) if month in months_map]
     return current_month in program_months
 
-# Replace is_program_due_today in program_manager.py
-
 def is_program_due_today(program):
     """
     Verifica se il programma è previsto per oggi in base alla cadenza.
@@ -234,10 +232,9 @@ async def execute_program(program, manual=False):
     Returns:
         boolean: True se l'esecuzione è completata con successo, False altrimenti
     """
+    # Ricarica lo stato per assicurarsi di avere dati aggiornati
+    load_program_state()
     global program_running, current_program_id
-    
-    # Importazione locale per evitare importazioni circolari
-    from program_state import program_running, current_program_id, save_program_state
     
     if program_running:
         log_event(f"Impossibile eseguire il programma: un altro programma è già in esecuzione ({current_program_id})", "WARNING")
@@ -245,16 +242,19 @@ async def execute_program(program, manual=False):
         return False
 
     # Se è un programma automatico, prima arresta tutte le zone manuali
-    # I programmi automatici hanno priorità come richiesto nel prompt
+    # I programmi automatici hanno priorità come richiesto
     if not manual:
         active_count = get_active_zones_count()
         if active_count > 0:
             log_event("Arresto di tutte le zone attive per dare priorità al programma automatico", "INFO")
-            stop_all_zones()
+            if not stop_all_zones():
+                log_event("Errore nell'arresto di tutte le zone attive, continuazione comunque", "WARNING")
             await asyncio.sleep(1)  # Piccolo ritardo per sicurezza
 
     # Spegni tutte le zone prima di avviare un nuovo programma
-    stop_all_zones()
+    if not stop_all_zones():
+        log_event("Errore nell'arresto di tutte le zone prima dell'avvio del programma", "ERROR")
+        return False
 
     program_id = str(program.get('id', '0'))  # Assicura che l'ID sia una stringa
     
@@ -301,7 +301,8 @@ async def execute_program(program, manual=False):
                 break
                 
             # Ferma la zona
-            stop_zone(zone_id)
+            if not stop_zone(zone_id):
+                log_event(f"Errore nell'arresto della zona {zone_id}", "WARNING")
             log_event(f"Zona {zone_id} completata.", "INFO")
             print(f"Zona {zone_id} completata.")
 
@@ -324,7 +325,8 @@ async def execute_program(program, manual=False):
         program_running = False
         current_program_id = None
         save_program_state()
-        stop_all_zones()  # Assicurati che tutte le zone siano disattivate
+        # Assicurati che tutte le zone siano disattivate, anche in caso di errore
+        stop_all_zones()  
 
 def stop_program():
     """
@@ -335,8 +337,8 @@ def stop_program():
     """
     global program_running, current_program_id
     
-    # Importazione locale per evitare importazioni circolari
-    from program_state import program_running, current_program_id, save_program_state
+    # Ricarica lo stato per assicurarsi di avere dati aggiornati
+    load_program_state()
     
     if not program_running:
         log_event("Nessun programma in esecuzione da interrompere", "INFO")
@@ -348,9 +350,12 @@ def stop_program():
     current_program_id = None
     save_program_state()  # Assicurati che lo stato venga salvato correttamente
 
-    # Aggiungi il codice per fermare tutte le zone attualmente attive
-    stop_all_zones()
-    log_event("Tutte le zone sono state arrestate", "INFO")
+    # Aggiunto controllo errori per fermare tutte le zone
+    if not stop_all_zones():
+        log_event("Errore nell'arresto di tutte le zone durante l'interruzione del programma", "ERROR")
+    else:
+        log_event("Tutte le zone sono state arrestate correttamente", "INFO")
+        
     return True
 
 def reset_program_state():
@@ -359,23 +364,23 @@ def reset_program_state():
     """
     global program_running, current_program_id
     
-    # Importazione locale per evitare importazioni circolari
-    from program_state import program_running, current_program_id, save_program_state
-    
     program_running = False
     current_program_id = None
     save_program_state()
     log_event("Stato del programma resettato", "INFO")
-
-# Replace the check_programs function in program_manager.py
 
 async def check_programs():
     """
     Controlla se ci sono programmi da eseguire automaticamente.
     Deve essere chiamato periodicamente.
     """
-    # Rimosso controllo globale di automatic_programs_enabled
-    # ora controlliamo per ogni singolo programma
+    # Verifica le impostazioni globali
+    settings = load_user_settings()
+    automatic_programs_enabled = settings.get('automatic_programs_enabled', False)
+    
+    # Se i programmi automatici sono disabilitati globalmente, non fare nulla
+    if not automatic_programs_enabled:
+        return
     
     programs = load_programs()
     if not programs:
@@ -401,16 +406,45 @@ async def check_programs():
             print(f"Avvio del programma pianificato: {program.get('name', 'Senza nome')}")
             
             # Se c'è già un programma in esecuzione, non fare nulla
+            load_program_state()  # Assicurati di avere lo stato aggiornato
             if program_running:
                 log_event("Impossibile avviare il programma: un altro programma è già in esecuzione", "WARNING")
                 continue
                 
-            # Avvia il programma
-            success = await execute_program(program)
-            if success:
-                update_last_run_date(program_id)
+            # Avvia il programma con gestione degli errori migliorata
+            try:
+                success = await execute_program(program)
+                if success:
+                    update_last_run_date(program_id)
+                else:
+                    log_event(f"Errore durante l'esecuzione del programma {program_id}", "ERROR")
+            except Exception as e:
+                log_event(f"Eccezione durante l'esecuzione del programma {program_id}: {e}", "ERROR")
+                print(f"Eccezione durante l'esecuzione del programma {program_id}: {e}")
 
-# Replace these functions in program_manager.py
+def _day_of_year(year, month, day):
+    """
+    Calcola il giorno dell'anno da una data.
+    
+    Args:
+        year: Anno
+        month: Mese
+        day: Giorno
+        
+    Returns:
+        int: Giorno dell'anno (1-366)
+    """
+    days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    
+    # Gestione anno bisestile
+    if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+        days_in_month[2] = 29
+    
+    day_of_year = day
+    for i in range(1, month):
+        day_of_year += days_in_month[i]
+    
+    return day_of_year
 
 def _get_formatted_date(t=None):
     """
@@ -426,7 +460,6 @@ def _get_formatted_date(t=None):
         t = time.localtime()
     return f"{t[0]}-{t[1]:02d}-{t[2]:02d}"
 
-# Replace the line using time.strftime in update_last_run_date function with:
 def update_last_run_date(program_id):
     """
     Aggiorna la data dell'ultima esecuzione del programma.
