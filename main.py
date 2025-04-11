@@ -1,19 +1,20 @@
 """
 File principale del sistema di irrigazione.
-Inizializza il sistema e avvia i servizi necessari.
+Inizializza il sistema, avvia i servizi necessari e implementa meccanismi di
+recupero da errori e monitoraggio.
 """
 from wifi_manager import initialize_network, reset_wifi_module, retry_client_connection
 from web_server import start_web_server
 from zone_manager import initialize_pins, stop_all_zones
 from program_manager import check_programs, reset_program_state
 from log_manager import log_event
-from system_monitor import start_diagnostics  # Importa il nuovo modulo di diagnostica
+from system_monitor import start_diagnostics
 import uasyncio as asyncio
 import gc
 import machine
 import time
 
-# Tentativo di importare il watchdog hardware
+# Configurazione watchdog hardware
 try:
     from machine import WDT
     HAS_WATCHDOG = True
@@ -22,181 +23,327 @@ except (ImportError, AttributeError):
 
 # Intervallo di controllo dei programmi in secondi
 PROGRAM_CHECK_INTERVAL = 30
+WATCHDOG_INTERVAL = 60  # Intervallo di attività del watchdog in secondi
+MAX_CONSECUTIVE_ERRORS = 5  # Numero massimo di errori consecutivi permessi
+ERROR_RESET_THRESHOLD = 3600  # 1 ora in secondi
+
+# Variabili globali per il monitoraggio
+consecutive_program_errors = 0
+last_error_reset_time = 0
+system_start_time = time.time()
 
 async def program_check_loop():
     """
     Task asincrono che controlla periodicamente i programmi di irrigazione.
+    Implementa meccanismi di recupero da errori e tentativi ripetuti.
     """
+    global consecutive_program_errors, last_error_reset_time
+    
     while True:
         try:
             # Controlla se ci sono programmi da avviare
             await check_programs()
+            
+            # Reset contatore errori in caso di successo
+            if consecutive_program_errors > 0:
+                consecutive_program_errors = 0
+                
+            # Attendi fino al prossimo controllo
             await asyncio.sleep(PROGRAM_CHECK_INTERVAL)
+            
+        except asyncio.CancelledError:
+            # Gestisce la cancellazione pulita del task
+            log_event("Task di controllo programmi cancellato", "INFO")
+            break
+            
         except Exception as e:
+            # Incrementa il contatore di errori consecutivi
+            consecutive_program_errors += 1
+            
+            # Logga l'errore
             log_event(f"Errore durante il controllo dei programmi: {e}", "ERROR")
-            await asyncio.sleep(PROGRAM_CHECK_INTERVAL)  # Continua comunque
+            
+            # Verifica se è il momento di resettare il contatore degli errori
+            current_time = time.time()
+            if current_time - last_error_reset_time > ERROR_RESET_THRESHOLD:
+                consecutive_program_errors = 1  # Mantieni questo errore
+                last_error_reset_time = current_time
+                log_event("Reset contatore errori dopo intervallo di tempo", "INFO")
+            
+            # Se ci sono troppi errori consecutivi, forza un reset più drastico
+            if consecutive_program_errors >= MAX_CONSECUTIVE_ERRORS:
+                log_event(f"Troppi errori consecutivi ({consecutive_program_errors}), reset forzato", "ERROR")
+                stop_all_zones()  # Arresta tutte le zone per sicurezza
+                reset_program_state()  # Resetta lo stato del programma
+                consecutive_program_errors = 0  # Reset contatore
+                
+                # Effettua un breve ritardo prima di riprendere le verifiche
+                await asyncio.sleep(10)
+            else:
+                # Continua anche dopo errori, ma attendi un po'
+                await asyncio.sleep(PROGRAM_CHECK_INTERVAL)
 
 async def watchdog_loop():
     """
-    Task asincrono che monitora lo stato del sistema e registra
-    periodicamente le informazioni di memoria disponibile.
+    Task asincrono per il monitoraggio del sistema e la gestione della memoria.
+    Implementa controlli di salute e recovery automatico.
     """
+    gc_counter = 0
+    
     while True:
         try:
+            # Incrementa un contatore per eseguire GC periodicamente
+            gc_counter += 1
+            
+            # Ogni iterazione (circa 1 minuto) controlla la memoria
             free_mem = gc.mem_free()
             allocated_mem = gc.mem_alloc()
             total_mem = free_mem + allocated_mem
             percent_free = (free_mem / total_mem) * 100
             
-            log_event(f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
+            # Logga le informazioni di memoria meno frequentemente (ogni ~10 minuti)
+            if gc_counter % 10 == 0:
+                uptime_hours = (time.time() - system_start_time) / 3600
+                log_event(f"Sistema attivo da {uptime_hours:.1f} ore, memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
             
-            # Forza la garbage collection
-            gc.collect()
-            
-            # Se memoria bassa, forza una garbage collection aggressiva
-            if percent_free < 20:
-                log_event("Memoria bassa rilevata, esecuzione pulizia aggressiva", "WARNING")
-                # Esegui più volte la garbage collection
-                for _ in range(3):
-                    gc.collect()
-                # Riavvia il server web se la memoria è estremamente bassa
+            # Forza GC se memoria è sotto il 30%
+            if percent_free < 30:
+                if percent_free < 15:
+                    log_event(f"ATTENZIONE: Memoria molto bassa ({percent_free:.1f}%), pulizia aggressiva", "WARNING")
+                    # Esegui garbage collection più volte per recuperare frammentazione
+                    for _ in range(3):
+                        gc.collect()
+                        await asyncio.sleep(0.1)  # Breve pausa tra gc
+                else:
+                    gc.collect()  # GC standard
+                
+                # Verifica l'efficacia della pulizia
+                new_free = gc.mem_free()
+                memory_recovered = new_free - free_mem
+                if memory_recovered > 1024:  # Se recuperati più di 1KB
+                    log_event(f"Recuperati {memory_recovered} bytes di memoria", "INFO")
+                
+                # Situazioni critiche di memoria
                 if percent_free < 10:
-                    log_event("Memoria critica, riavvio del server web", "WARNING")
+                    log_event("Memoria CRITICA, tentativo di ripristino del sistema", "ERROR")
+                    
+                    # Riavvia il server web (componente che consuma più memoria)
                     try:
                         from web_server import app
                         if hasattr(app, 'server') and app.server:
                             app.server.close()
                             await asyncio.sleep(1)
                             asyncio.create_task(app.start_server(host='0.0.0.0', port=80))
+                            log_event("Server web riavviato per recuperare memoria", "INFO")
                     except Exception as e:
                         log_event(f"Errore nel riavvio del server web: {e}", "ERROR")
+                    
+                    # In caso critico, arresta tutte le zone e resetta lo stato per sicurezza
+                    stop_all_zones()
+                    reset_program_state()
             
-            # Controllo ogni 10 minuti invece di ogni ora
-            await asyncio.sleep(600)
+            # Attendi prima del prossimo controllo
+            await asyncio.sleep(WATCHDOG_INTERVAL)
+            
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             log_event(f"Errore nel watchdog: {e}", "ERROR")
-            await asyncio.sleep(60)  # Ridotto a 1 minuto in caso di errore
+            # Ridotto a 30 secondi in caso di errore
+            await asyncio.sleep(30)
 
 async def main():
     """
     Funzione principale che inizializza il sistema e avvia i task asincroni.
+    Implementa un design resiliente con recupero da errori e retry.
     """
+    global system_start_time
+    system_start_time = time.time()
+    
+    # Task principali del sistema
+    tasks = []
+    
     try:
-        # Inizializza il watchdog hardware se disponibile
+        # FASE 1: Inizializzazione del watchdog hardware
         wdt = None
         if HAS_WATCHDOG:
             try:
-                wdt = WDT(timeout=60000)  # timeout di 60 secondi
+                wdt = WDT(timeout=90000)  # timeout di 90 secondi
                 log_event("Watchdog hardware inizializzato", "INFO")
             except Exception as e:
-                log_event(f"Hardware watchdog non inizializzato: {e}", "WARNING")
-                print(f"Hardware watchdog non inizializzato: {e}")
+                log_event(f"Hardware watchdog non disponibile: {e}", "WARNING")
         
         log_event("Avvio del sistema di irrigazione", "INFO")
         
-        # Disattiva Bluetooth se disponibile per risparmiare memoria
+        # FASE 2: Ottimizzazione delle risorse
+        # Disattiva funzionalità non necessarie per risparmiare memoria
         try:
+            # Disattiva Bluetooth se disponibile
             import bluetooth
             bt = bluetooth.BLE()
             bt.active(False)
-            log_event("Bluetooth disattivato", "INFO")
+            log_event("Bluetooth disattivato per risparmiare risorse", "INFO")
         except ImportError:
-            print("Modulo Bluetooth non presente.")
+            pass  # Bluetooth non disponibile, nessuna azione necessaria
         
         # Pulizia iniziale della memoria
         gc.collect()
         
-        # Resetta lo stato di tutte le zone per sicurezza
+        # FASE 3: Inizializzazione della sicurezza
+        # Resetta lo stato di tutte le zone per garantire uno stato sicuro all'avvio
         log_event("Arresto di tutte le zone attive", "INFO")
         stop_all_zones()
         
-        # Inizializza la rete WiFi
+        # FASE 4: Inizializzazione hardware
+        # Inizializza i pin per le zone di irrigazione
+        if not initialize_pins():
+            log_event("ATTENZIONE: Problemi nell'inizializzazione delle zone", "WARNING")
+        else:
+            log_event("Zone inizializzate correttamente", "INFO")
+        
+        # FASE 5: Inizializzazione della rete
+        # Strategia resiliente con retry e fallback
+        wifi_initialized = False
         try:
-            print("Inizializzazione della rete WiFi...")
+            log_event("Inizializzazione della rete WiFi", "INFO")
             initialize_network()
+            wifi_initialized = True
             log_event("Rete WiFi inizializzata", "INFO")
         except Exception as e:
-            log_event(f"Errore durante l'inizializzazione della rete WiFi: {e}", "ERROR")
-            # Riprova con reset
+            log_event(f"Errore inizializzazione WiFi: {e}, tentativo con reset", "WARNING")
+            
+            # Primo tentativo di recovery: reset del modulo WiFi
             try:
                 reset_wifi_module()
                 initialize_network()
+                wifi_initialized = True
                 log_event("Rete WiFi inizializzata dopo reset", "INFO")
-            except Exception as e:
-                log_event(f"Impossibile inizializzare la rete WiFi: {e}", "ERROR")
-                print("Continuazione con funzionalità limitate...")
-
-        # Resetta lo stato del programma all'avvio
+            except Exception as e2:
+                log_event(f"Impossibile inizializzare WiFi anche dopo reset: {e2}", "ERROR")
+                log_event("Continuazione con funzionalità limitate", "WARNING")
+        
+        # FASE 6: Inizializzazione del programma
+        # Assicurati che non ci siano programmi sospesi dall'avvio precedente
         reset_program_state()
         log_event("Stato del programma resettato", "INFO")
         
-        # Inizializza le zone
-        if not initialize_pins():
-            log_event("Errore: Nessuna zona inizializzata correttamente.", "ERROR")
-            print("Errore: Nessuna zona inizializzata correttamente.")
-        else:
-            log_event("Zone inizializzate correttamente.", "INFO")
-            print("Zone inizializzate correttamente.")
+        # FASE 7: Avvio dei servizi principali
+        # Ogni servizio è avviato come task asincrono separato
         
-        # Avvia i task asincroni
-        print("Avvio del web server...")
+        # Avvia il web server
+        log_event("Avvio del web server", "INFO")
         web_server_task = asyncio.create_task(start_web_server())
-        log_event("Web server avviato", "INFO")
+        tasks.append(web_server_task)
         
-        print("Avvio del controllo dei programmi...")
+        # Avvia il controllo dei programmi
+        log_event("Avvio del controllo programmi", "INFO")
         program_check_task = asyncio.create_task(program_check_loop())
-        log_event("Loop di controllo programmi avviato", "INFO")
+        tasks.append(program_check_task)
         
-        # Avvia il task per il retry della connessione WiFi
-        retry_wifi_task = asyncio.create_task(retry_client_connection())
-        log_event("Task di retry connessione WiFi avviato", "INFO")
+        # Avvia il task di connessione WiFi (solo se l'inizializzazione è riuscita)
+        if wifi_initialized:
+            log_event("Avvio task di monitoraggio connessione WiFi", "INFO")
+            retry_wifi_task = asyncio.create_task(retry_client_connection())
+            tasks.append(retry_wifi_task)
         
-        # Avvia il watchdog
+        # Avvia il task di monitoraggio del sistema
+        log_event("Avvio watchdog di sistema", "INFO")
         watchdog_task = asyncio.create_task(watchdog_loop())
-        log_event("Watchdog avviato", "INFO")
-
-        # Avvia il sistema di diagnostica
+        tasks.append(watchdog_task)
+        
+        # Avvia il sistema di diagnostica e monitoraggio avanzato
+        log_event("Avvio sistema di diagnostica", "INFO")
         diagnostics_task = asyncio.create_task(start_diagnostics())
-        log_event("Sistema di diagnostica avviato", "INFO")
+        tasks.append(diagnostics_task)
 
-        # Mantiene il loop in esecuzione
+        # FASE 8: Loop principale con monitoraggio del sistema
         log_event("Sistema avviato con successo", "INFO")
         print("Sistema avviato con successo. In esecuzione...")
         
-        # Loop principale - resetta il watchdog hardware
+        # Resetta il watchdog e monitora i task attivi
         while True:
+            # Resetta il watchdog hardware se attivo
             if wdt:
-                wdt.feed()  # Reimposta il watchdog hardware
+                wdt.feed()
+            
+            # Verifica che tutti i task siano ancora attivi
+            for i, task in enumerate(tasks[:]):
+                if task.done():
+                    try:
+                        # Verifica se il task è terminato con errore
+                        exc = task.exception()
+                        if exc:
+                            log_event(f"Task {i} terminato con errore: {exc}", "ERROR")
+                            
+                            # Riavvia il task se possibile
+                            if i == 0:  # Web server
+                                log_event("Tentativo di riavvio del web server", "INFO")
+                                tasks[0] = asyncio.create_task(start_web_server())
+                            elif i == 1:  # Program check
+                                log_event("Tentativo di riavvio del controllo programmi", "INFO")
+                                tasks[1] = asyncio.create_task(program_check_loop())
+                            elif i == 2 and wifi_initialized:  # WiFi retry
+                                log_event("Tentativo di riavvio del task WiFi", "INFO")
+                                tasks[2] = asyncio.create_task(retry_client_connection())
+                            elif i == 3:  # Watchdog
+                                log_event("Tentativo di riavvio del watchdog", "INFO")
+                                tasks[3] = asyncio.create_task(watchdog_loop())
+                            elif i == 4:  # Diagnostics
+                                log_event("Tentativo di riavvio del sistema di diagnostica", "INFO")
+                                tasks[4] = asyncio.create_task(start_diagnostics())
+                        else:
+                            log_event(f"Task {i} terminato normalmente", "INFO")
+                    except Exception as e:
+                        log_event(f"Errore nel controllo dei task: {e}", "ERROR")
+            
+            # Forza garbage collection periodicamente nel loop principale
+            gc.collect()
+            
+            # Pausa prima della prossima iterazione
             await asyncio.sleep(1)
 
+    except asyncio.CancelledError:
+        log_event("Loop principale cancellato, arresto sistema", "WARNING")
     except Exception as e:
         log_event(f"Errore critico nel main: {e}", "ERROR")
-        print(f"Errore critico: {e}")
-        # In caso di errore grave, attendere 10 secondi e riavviare il sistema
-        time.sleep(10)
+        print(f"ERRORE CRITICO: {e}")
+        # Pausa breve per permettere la registrazione dell'errore
+        await asyncio.sleep(1)
+        
+        # Tenta un riavvio sicuro
         machine.reset()
 
 def start():
     """
     Funzione di avvio chiamata quando il sistema si accende.
-    Gestisce eventuali eccezioni generali.
+    Gestisce la configurazione iniziale e avvia il loop principale.
     """
     try:
-        # Imposta una frequenza di clock più alta per prestazioni migliori
+        # Ottimizzazione della CPU per prestazioni migliori
         try:
             import machine
-            # Imposta frequenza CPU a 240MHz
+            # Imposta frequenza CPU a 240MHz su ESP32
             machine.freq(240000000)
+            print(f"CPU impostata a {machine.freq()/1000000} MHz")
         except:
             pass
         
-        # Avvia il loop principale
+        # Avvia il loop principale con gestione eccezioni
         asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Interruzione da tastiera, arresto sistema")
     except Exception as e:
-        print(f"Errore nell'avvio del main: {e}")
-        # Attendi 10 secondi e riavvia
-        time.sleep(10)
-        import machine
+        print(f"Errore fatale all'avvio: {e}")
+        
+        # Salva l'errore nel log prima del riavvio
+        try:
+            from log_manager import log_event
+            log_event(f"ERRORE FATALE ALL'AVVIO: {e}", "ERROR")
+        except:
+            pass
+            
+        # Attendi prima di riavviare
+        time.sleep(5)
         machine.reset()
 
 # Punto di ingresso principale

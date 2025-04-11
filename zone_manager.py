@@ -10,10 +10,10 @@ from settings_manager import load_user_settings
 from log_manager import log_event
 from program_state import program_running, load_program_state
 
-# Variabili globali
-active_zones = {}
-zone_pins = {}
-safety_relay = None
+# Variabili globali con tipi più specifici per migliorare la chiarezza e l'efficienza
+active_zones = {}  # Dict[int, Dict[str, any]]
+zone_pins = {}     # Dict[int, Pin]
+safety_relay = None  # Pin or None
 
 def initialize_pins():
     """
@@ -36,6 +36,9 @@ def initialize_pins():
     # Inizializza i pin per le zone
     initialized_zones = 0
     for zone in zones:
+        if not isinstance(zone, dict):
+            continue
+            
         zone_id = zone.get('id')
         pin_number = zone.get('pin')
         if pin_number is None or zone_id is None:
@@ -89,6 +92,10 @@ def get_zones_status():
             return []
             
         configured_zones = settings.get('zones', [])
+        if not configured_zones or not isinstance(configured_zones, list):
+            return []
+            
+        current_time = time.time()  # Ottimizzazione: chiamare time.time() una sola volta
         
         for zone in configured_zones:
             if not zone or not isinstance(zone, dict):
@@ -101,21 +108,23 @@ def get_zones_status():
             if zone.get('status') != 'show':
                 continue
                 
+            is_active = zone_id in active_zones
+            
             zone_info = {
                 'id': zone_id,
                 'name': zone.get('name', f'Zona {zone_id + 1}'),
-                'active': zone_id in active_zones,
+                'active': is_active,
                 'remaining_time': 0
             }
             
             # Calcola il tempo rimanente se la zona è attiva
-            if zone_id in active_zones:
+            if is_active:
                 zone_data = active_zones.get(zone_id, {})
                 start_time = zone_data.get('start_time', 0)
                 duration = zone_data.get('duration', 0) * 60  # In secondi
                 
                 try:
-                    elapsed = int(time.time() - start_time)
+                    elapsed = int(current_time - start_time)
                     remaining = max(0, duration - elapsed)
                     zone_info['remaining_time'] = remaining
                 except Exception as e:
@@ -153,8 +162,12 @@ def start_zone(zone_id, duration):
     global active_zones, zone_pins, safety_relay
     
     # Converti in interi
-    zone_id = int(zone_id)
-    duration = int(duration)
+    try:
+        zone_id = int(zone_id)
+        duration = int(duration)
+    except (ValueError, TypeError):
+        log_event(f"Errore: Tipo di dati non valido per zone_id o duration", "ERROR")
+        return False
     
     # Ricarica lo stato per avere dati aggiornati prima della verifica critica
     load_program_state()
@@ -187,45 +200,51 @@ def start_zone(zone_id, duration):
         print(f"Impossibile avviare la zona {zone_id}: Numero massimo di zone attive raggiunto ({max_active_zones}).")
         return False
 
-    # Accende il relè di sicurezza se non è già acceso
+    # Operazione multipass: prima prepara tutto, poi esegue le azioni irreversibili
+    # Questo riduce la possibilità di stati inconsistenti
+    
+    # FASE 1: Preparazione
+    # Se la zona è già attiva, prepara la cancellazione del task precedente
+    old_task = None
+    if zone_id in active_zones and 'task' in active_zones[zone_id]:
+        try:
+            old_task = active_zones[zone_id]['task']
+        except Exception as e:
+            log_event(f"Errore accesso al task precedente: {e}", "WARNING")
+    
+    # FASE 2: Esecuzione delle operazioni
+    # Accende il relè di sicurezza se non è già acceso e non ci sono zone attive
     if safety_relay and not active_zones:
         try:
             safety_relay.value(0)  # Attiva il relè di sicurezza (logica attiva bassa)
             log_event("Relè di sicurezza attivato", "INFO")
-            print("Relè di sicurezza attivato.")
         except Exception as e:
             log_event(f"Errore durante l'attivazione del relè di sicurezza: {e}", "ERROR")
-            print(f"Errore durante l'attivazione del relè di sicurezza: {e}")
             return False
 
     # Attiva il relè per la zona specificata
     try:
         zone_pins[zone_id].value(0)  # Attiva la zona (logica attiva bassa)
         log_event(f"Zona {zone_id} avviata per {duration} minuti", "INFO")
-        print(f"Zona {zone_id} avviata per {duration} minuti.")
     except Exception as e:
         log_event(f"Errore durante l'attivazione della zona {zone_id}: {e}", "ERROR")
-        print(f"Errore durante l'attivazione della zona {zone_id}: {e}")
         
-        # Disattiva il relè di sicurezza se era stato attivato e non ci sono altre zone attive
+        # Disattiva il relè di sicurezza se era stato appena attivato
         if safety_relay and not active_zones:
             try:
                 safety_relay.value(1)  # Disattiva il relè di sicurezza (logica attiva bassa)
-                log_event("Relè di sicurezza disattivato dopo errore", "INFO")
-            except Exception as nested_e:
-                log_event(f"Errore durante lo spegnimento del relè di sicurezza dopo errore: {nested_e}", "ERROR")
-        
+            except:
+                pass  # Non loggare errori qui per evitare cascate di errori
         return False
 
-    # Se la zona è già attiva, cancella il task precedente
-    if zone_id in active_zones and 'task' in active_zones[zone_id]:
+    # FASE 3: Gestione del timer e dello stato
+    # Cancella il vecchio task se esiste e non è già cancellato
+    if old_task:
         try:
-            task = active_zones[zone_id]['task']
-            if task and not task.cancelled():
-                task.cancel()
+            if not old_task.cancelled():
+                old_task.cancel()
         except Exception as e:
             log_event(f"Errore cancellazione task precedente: {e}", "WARNING")
-            print(f"Errore cancellazione task precedente: {e}")
 
     # Crea un nuovo task per lo spegnimento automatico
     task = asyncio.create_task(_zone_timer(zone_id, duration))
@@ -250,16 +269,15 @@ async def _zone_timer(zone_id, duration):
     try:
         await asyncio.sleep(duration * 60)  # Durata in minuti convertita in secondi
         
-        # Evitare situazioni di race condition
+        # Verificare che la zona sia ancora attiva prima di disattivarla
+        # per evitare situazioni di race condition
         if zone_id in active_zones:
-            # Chiamiamo stop_zone ma segnaliamo che il timer è in esecuzione
             await _safe_stop_zone(zone_id)
     except asyncio.CancelledError:
-        log_event(f"Timer per la zona {zone_id} cancellato", "INFO")
-        print(f"Timer per la zona {zone_id} cancellato.")
+        # Normale quando la zona viene disattivata manualmente
+        pass
     except Exception as e:
         log_event(f"Errore nel timer della zona {zone_id}: {e}", "ERROR")
-        print(f"Errore nel timer della zona {zone_id}: {e}")
 
 async def _safe_stop_zone(zone_id):
     """
@@ -270,40 +288,41 @@ async def _safe_stop_zone(zone_id):
     """
     global active_zones, zone_pins, safety_relay
     
-    # Converti in intero
-    zone_id = int(zone_id)
+    # Verifica che i parametri di input siano validi
+    try:
+        zone_id = int(zone_id)
+    except:
+        log_event(f"Errore: zone_id non valido in _safe_stop_zone", "ERROR")
+        return
 
     if zone_id not in zone_pins:
-        log_event(f"Errore: Zona {zone_id} non trovata per l'arresto sicuro", "ERROR")
         return
     
-    # Assicurati che l'oggetto zone_id esista ancora in active_zones
+    # Assicurati che la zona sia ancora attiva
     if zone_id not in active_zones:
         return
 
     # Disattiva il relè della zona
     try:
         zone_pins[zone_id].value(1)  # Disattiva la zona (logica attiva bassa)
-        log_event(f"Zona {zone_id} arrestata", "INFO")
-        print(f"Zona {zone_id} arrestata.")
+        log_event(f"Zona {zone_id} arrestata automaticamente", "INFO")
     except Exception as e:
-        log_event(f"Errore durante l'arresto della zona {zone_id}: {e}", "ERROR")
-        print(f"Errore durante l'arresto della zona {zone_id}: {e}")
+        log_event(f"Errore durante l'arresto automatico zona {zone_id}: {e}", "ERROR")
         return
     
-    # Rimuovi la zona dalle zone attive - non cancelliamo il task perché siamo già nel task
-    if zone_id in active_zones:
-        del active_zones[zone_id]
+    # Memorizza quante zone attive c'erano prima di rimuovere questa
+    was_last_active = len(active_zones) == 1
     
-    # Spegne il relè di sicurezza se non ci sono altre zone attive
-    if safety_relay and not active_zones:
+    # Rimuovi la zona dalle zone attive
+    del active_zones[zone_id]
+    
+    # Spegne il relè di sicurezza se questa era l'ultima zona attiva
+    if safety_relay and was_last_active:
         try:
             safety_relay.value(1)  # Disattiva il relè di sicurezza (logica attiva bassa)
             log_event("Relè di sicurezza disattivato", "INFO")
-            print("Relè di sicurezza disattivato.")
         except Exception as e:
             log_event(f"Errore durante lo spegnimento del relè di sicurezza: {e}", "ERROR")
-            print(f"Errore durante lo spegnimento del relè di sicurezza: {e}")
 
 def stop_zone(zone_id):
     """
@@ -317,53 +336,56 @@ def stop_zone(zone_id):
     """
     global active_zones, zone_pins, safety_relay
     
-    # Converti in intero
-    zone_id = int(zone_id)
+    # Converti zone_id in intero e verifica che sia valido
+    try:
+        zone_id = int(zone_id)
+    except (ValueError, TypeError):
+        log_event(f"Errore: Tipo di dati non valido per zone_id in stop_zone", "ERROR")
+        return False
 
     if zone_id not in zone_pins:
         log_event(f"Errore: Zona {zone_id} non trovata per l'arresto", "ERROR")
-        print(f"Errore: Zona {zone_id} non trovata per l'arresto.")
         return False
 
-    # Disattiva il relè della zona
+    # FASE 1: Controlla se la zona è attiva
+    zone_data = None
+    was_last_active = False
+    
+    if zone_id in active_zones:
+        zone_data = active_zones[zone_id]
+        was_last_active = len(active_zones) == 1
+    
+    # FASE 2: Disattiva il relè della zona
     try:
         zone_pins[zone_id].value(1)  # Disattiva la zona (logica attiva bassa)
         log_event(f"Zona {zone_id} arrestata", "INFO")
-        print(f"Zona {zone_id} arrestata.")
     except Exception as e:
         log_event(f"Errore durante l'arresto della zona {zone_id}: {e}", "ERROR")
-        print(f"Errore durante l'arresto della zona {zone_id}: {e}")
         return False
 
-    # Rimuovi la zona dalle zone attive e cancella il task in modo sicuro
+    # FASE 3: Gestione dello stato e del task
+    # Rimuovi la zona dalle zone attive
     if zone_id in active_zones:
-        zone_data = active_zones[zone_id]
-        del active_zones[zone_id]  # Rimuovi la zona prima di cancellare il task
+        del active_zones[zone_id]
         
-        # Cancella il task se esiste e non è già stato cancellato
-        if 'task' in zone_data and zone_data['task']:
+        # Cancella il task se esiste
+        if zone_data and 'task' in zone_data and zone_data['task']:
             try:
                 task = zone_data['task']
-                # Verifica se il task è il task corrente
-                # Questo previene l'errore "can't cancel self"
-                import asyncio
+                # Verifica se il task non è il task corrente per evitare "can't cancel self"
                 current_task = asyncio.current_task()
-                
                 if task is not current_task and not task.cancelled():
                     task.cancel()
             except Exception as e:
-                log_event(f"Errore durante la cancellazione del task per la zona {zone_id}: {e}", "WARNING")
-                print(f"Errore durante la cancellazione del task per la zona {zone_id}: {e}")
+                log_event(f"Errore cancellazione task zona {zone_id}: {e}", "WARNING")
 
-    # Spegne il relè di sicurezza se non ci sono altre zone attive
-    if safety_relay and not active_zones:
+    # FASE 4: Spegni il relè di sicurezza se questa era l'ultima zona attiva
+    if safety_relay and was_last_active and not active_zones:
         try:
             safety_relay.value(1)  # Disattiva il relè di sicurezza (logica attiva bassa)
             log_event("Relè di sicurezza disattivato", "INFO")
-            print("Relè di sicurezza disattivato.")
         except Exception as e:
-            log_event(f"Errore durante lo spegnimento del relè di sicurezza: {e}", "ERROR")
-            print(f"Errore durante lo spegnimento del relè di sicurezza: {e}")
+            log_event(f"Errore spegnimento relè sicurezza: {e}", "ERROR")
             return False
             
     return True
@@ -375,39 +397,70 @@ def stop_all_zones():
     Returns:
         boolean: True se l'operazione è riuscita, False altrimenti
     """
-    global active_zones
+    global active_zones, zone_pins, safety_relay
     
+    # Se non ci sono zone attive, non fare nulla
     if not active_zones:
         return True
         
     success = True
-    # Crea una copia delle chiavi per evitare errori durante l'iterazione
+    had_errors = False
+    
+    # Ottimizzazione: crea una copia delle chiavi per evitare errori durante l'iterazione
     zone_ids = list(active_zones.keys())
+    
+    # FASE 1: Prova a disattivare ogni zona normalmente
     for zone_id in zone_ids:
         if not stop_zone(zone_id):
+            had_errors = True
             success = False
     
-    # Verifica che tutte le zone siano state effettivamente disattivate
+    # FASE 2: Se ci sono ancora zone attive, forza la disattivazione
     if active_zones:
-        log_event("Alcune zone non sono state disattivate. Secondo tentativo forzato.", "WARNING")
-        # Forzare la disattivazione di tutte le zone rimanenti
-        for zone_id in list(active_zones.keys()):
+        log_event("Zone ancora attive dopo il primo tentativo. Forzatura disattivazione.", "WARNING")
+        remaining_ids = list(active_zones.keys())
+        
+        for zone_id in remaining_ids:
             try:
                 if zone_id in zone_pins:
                     zone_pins[zone_id].value(1)  # Disattiva la zona (logica attiva bassa)
-                del active_zones[zone_id]
+                
+                # Cancella il task associato alla zona se possibile
+                if zone_id in active_zones and 'task' in active_zones[zone_id]:
+                    try:
+                        task = active_zones[zone_id]['task']
+                        if task and not task.cancelled():
+                            task.cancel()
+                    except Exception:
+                        pass  # Ignora errori di cancellazione in questa fase
+                
+                # Rimuovi la zona dalle zone attive
+                if zone_id in active_zones:
+                    del active_zones[zone_id]
+                
             except Exception as e:
-                log_event(f"Errore durante la disattivazione forzata della zona {zone_id}: {e}", "ERROR")
+                log_event(f"Errore disattivazione forzata zona {zone_id}: {e}", "ERROR")
                 success = False
     
-    # Assicurarsi che il relè di sicurezza sia disattivato
+    # FASE 3: Disattiva sempre il relè di sicurezza, indipendentemente dal successo precedente
     if safety_relay:
         try:
             safety_relay.value(1)  # Disattiva il relè di sicurezza (logica attiva bassa)
+            log_event("Relè di sicurezza disattivato durante arresto zone", "INFO")
         except Exception as e:
-            log_event(f"Errore durante la disattivazione del relè di sicurezza: {e}", "ERROR")
+            log_event(f"Errore disattivazione relè sicurezza: {e}", "ERROR")
             success = False
     
-    log_event("Tutte le zone arrestate", "INFO")
-    print("Tutte le zone arrestate.")
+    # FASE 4: Assicurati che active_zones sia vuoto in ogni caso
+    if active_zones:
+        log_event("Pulizia forzata dell'elenco zone attive", "WARNING")
+        active_zones.clear()
+    
+    # Se non ci sono stati errori, ma avevamo rilevato problemi,
+    # aggiungi un log informativo che conferma la risoluzione
+    if success and had_errors:
+        log_event("Tutte le zone sono state arrestate con successo dopo errori iniziali", "INFO")
+    elif success:
+        log_event("Tutte le zone arrestate correttamente", "INFO")
+    
     return success

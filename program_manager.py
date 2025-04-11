@@ -1,45 +1,101 @@
 """
 Modulo per la gestione dei programmi di irrigazione.
-Gestisce il caricamento, la creazione, l'aggiornamento e l'esecuzione dei programmi.
+Gestisce il caricamento, la creazione, l'aggiornamento e l'esecuzione dei programmi
+con meccanismi di sicurezza e gestione degli errori.
 """
 import ujson
 import time
 import uasyncio as asyncio
 from zone_manager import start_zone, stop_zone, stop_all_zones, get_active_zones_count
 from program_state import program_running, current_program_id, save_program_state, load_program_state
-from settings_manager import load_user_settings, save_user_settings
+from settings_manager import load_user_settings
 from log_manager import log_event
 
 PROGRAM_STATE_FILE = '/data/program_state.json'
 PROGRAM_FILE = '/data/program.json'
 
-def load_programs():
+# Cache per i programmi - ottimizza le operazioni di lettura/scrittura
+_programs_cache = None
+_programs_cache_valid = False
+
+def _ensure_programs_file_exists():
     """
-    Carica i programmi dal file.
+    Assicura che il file dei programmi esista.
+    """
+    try:
+        # Verifica se il file esiste
+        try:
+            with open(PROGRAM_FILE, 'r') as f:
+                return
+        except OSError:
+            # Il file non esiste, crealo
+            with open(PROGRAM_FILE, 'w') as f:
+                ujson.dump({}, f)
+            log_event("File programmi creato", "INFO")
+    except Exception as e:
+        log_event(f"Errore nella verifica/creazione del file programmi: {e}", "ERROR")
+
+def load_programs(force_reload=False):
+    """
+    Carica i programmi dal file con supporto alla cache.
     
+    Args:
+        force_reload: Se True, ricarica dal disco anche se la cache è valida
+        
     Returns:
         dict: Dizionario dei programmi
     """
+    global _programs_cache, _programs_cache_valid
+    
+    # Se la cache è valida e non è richiesto un ricaricamento forzato, usa la cache
+    if _programs_cache_valid and not force_reload and _programs_cache is not None:
+        return _programs_cache.copy()  # Ritorna una copia per sicurezza
+    
     try:
+        _ensure_programs_file_exists()
+        
         with open(PROGRAM_FILE, 'r') as f:
             programs = ujson.load(f)
-            # Assicura che tutti gli ID siano stringhe
+            
+            # Validazione del formato
+            if not isinstance(programs, dict):
+                log_event("Formato file programmi non valido, inizializzazione nuovo file", "WARNING")
+                programs = {}
+                save_programs(programs)
+            
+            # Assicura che tutti gli ID siano stringhe e ogni programma abbia il suo ID
             for prog_id in list(programs.keys()):
-                if programs[prog_id].get('id') is None:
-                    programs[prog_id]['id'] = str(prog_id)
+                if not isinstance(programs[prog_id], dict):
+                    # Rimuovi programmi non validi
+                    del programs[prog_id]
+                    continue
+                    
+                # Assicura che l'ID sia salvato nel programma stesso
+                programs[prog_id]['id'] = str(prog_id)
+            
+            # Aggiorna la cache
+            _programs_cache = programs.copy()
+            _programs_cache_valid = True
+            
             return programs
     except OSError:
         log_event("File program.json non trovato, creazione file vuoto", "WARNING")
         empty_programs = {}
         save_programs(empty_programs)
+        
+        # Aggiorna la cache
+        _programs_cache = empty_programs.copy()
+        _programs_cache_valid = True
+        
         return empty_programs
     except Exception as e:
-        log_event(f"Errore durante il caricamento dei programmi: {e}", "ERROR")
+        log_event(f"Errore caricamento programmi: {e}", "ERROR")
+        # In caso di errore, ritorna un dizionario vuoto
         return {}
 
 def save_programs(programs):
     """
-    Salva i programmi su file.
+    Salva i programmi su file in modo atomico.
     
     Args:
         programs: Dizionario dei programmi da salvare
@@ -47,15 +103,51 @@ def save_programs(programs):
     Returns:
         boolean: True se l'operazione è riuscita, False altrimenti
     """
+    global _programs_cache, _programs_cache_valid
+    
+    if not isinstance(programs, dict):
+        log_event("Errore: tentativo di salvare programmi non validi", "ERROR")
+        return False
+    
     try:
-        with open(PROGRAM_FILE, 'w') as f:
+        # Assicura che la directory esista
+        try:
+            import uos
+            try:
+                uos.stat('/data')
+            except OSError:
+                uos.mkdir('/data')
+        except:
+            pass
+        
+        # Scrittura atomica tramite file temporaneo
+        temp_file = PROGRAM_FILE + '.tmp'
+        with open(temp_file, 'w') as f:
             ujson.dump(programs, f)
+            f.flush()  # Flush esplicito per garantire la scrittura su disco
+        
+        # Rinomina il file temporaneo (operazione atomica su molti filesystem)
+        import uos
+        uos.rename(temp_file, PROGRAM_FILE)
+        
+        # Aggiorna la cache
+        _programs_cache = programs.copy()
+        _programs_cache_valid = True
+        
         log_event("Programmi salvati con successo", "INFO")
         return True
-    except OSError as e:
-        log_event(f"Errore durante il salvataggio dei programmi: {e}", "ERROR")
-        print(f"Errore durante il salvataggio dei programmi: {e}")
+    except Exception as e:
+        log_event(f"Errore salvataggio programmi: {e}", "ERROR")
+        # Invalida la cache in caso di errore
+        _programs_cache_valid = False
         return False
+
+def invalidate_programs_cache():
+    """
+    Invalida la cache dei programmi, forzando una rilettura alla prossima richiesta.
+    """
+    global _programs_cache_valid
+    _programs_cache_valid = False
 
 def check_program_conflicts(program, programs, exclude_id=None):
     """
@@ -69,6 +161,11 @@ def check_program_conflicts(program, programs, exclude_id=None):
     Returns:
         tuple: (has_conflict, conflict_message)
     """
+    # Validazione degli input
+    if not isinstance(program, dict) or not isinstance(programs, dict):
+        return False, ""
+    
+    # Estrai i mesi e l'orario dal programma
     program_months = set(program.get('months', []))
     if not program_months:
         return False, ""
@@ -77,17 +174,29 @@ def check_program_conflicts(program, programs, exclude_id=None):
     if not program_time:
         return False, ""  # Senza orario non ci possono essere conflitti
     
+    # Converti exclude_id a stringa se non è None
+    if exclude_id is not None:
+        exclude_id = str(exclude_id)
+    
+    # Verifica i conflitti con altri programmi
     for pid, existing_program in programs.items():
-        if exclude_id and str(pid) == str(exclude_id):
-            continue  # Salta il programma stesso durante la modifica
+        # Salta il programma stesso durante la modifica
+        if exclude_id and str(pid) == exclude_id:
+            continue
             
+        # Salta i programmi non validi
+        if not isinstance(existing_program, dict):
+            continue
+            
+        # Estrai mesi e orario dal programma esistente
         existing_months = set(existing_program.get('months', []))
         existing_time = existing_program.get('activation_time', '')
         
         # Verifica se c'è sovrapposizione nei mesi E lo stesso orario di attivazione
         if program_months.intersection(existing_months) and program_time == existing_time:
             # C'è una sovrapposizione nei mesi e lo stesso orario
-            return True, f"Conflitto con il programma '{existing_program.get('name', '')}' nei mesi e orario selezionati"
+            program_name = existing_program.get('name', f'Programma {pid}')
+            return True, f"Conflitto con '{program_name}' nei mesi e orario selezionati"
     
     return False, ""
 
@@ -102,8 +211,12 @@ def update_program(program_id, updated_program):
     Returns:
         tuple: (success, error_message)
     """
+    # Validazione degli input
+    if not isinstance(updated_program, dict):
+        return False, "Formato programma non valido"
+    
     program_id = str(program_id)  # Assicura che l'ID sia una stringa
-    programs = load_programs()
+    programs = load_programs(force_reload=True)
     
     # Verifica conflitti (escludi il programma che stiamo aggiornando)
     has_conflict, conflict_message = check_program_conflicts(updated_program, programs, exclude_id=program_id)
@@ -113,10 +226,14 @@ def update_program(program_id, updated_program):
     
     if program_id in programs:
         # Se il programma è in esecuzione, fermalo prima di aggiornarlo
+        load_program_state()  # Forza il caricamento dello stato più recente
         if program_running and current_program_id == program_id:
             stop_program()
             
+        # Assicurati che l'ID del programma sia preservato
+        updated_program['id'] = program_id
         programs[program_id] = updated_program
+        
         if save_programs(programs):
             log_event(f"Programma {program_id} aggiornato con successo", "INFO")
             return True, ""
@@ -125,9 +242,8 @@ def update_program(program_id, updated_program):
             log_event(error_msg, "ERROR")
             return False, error_msg
     else:
-        error_msg = f"Errore: Programma con ID {program_id} non trovato."
+        error_msg = f"Programma con ID {program_id} non trovato"
         log_event(error_msg, "ERROR")
-        print(error_msg)
         return False, error_msg
 
 def delete_program(program_id):
@@ -141,14 +257,17 @@ def delete_program(program_id):
         boolean: True se l'operazione è riuscita, False altrimenti
     """
     program_id = str(program_id)  # Assicura che l'ID sia una stringa
-    programs = load_programs()
+    programs = load_programs(force_reload=True)
     
     if program_id in programs:
         # Se il programma è in esecuzione, fermalo prima di eliminarlo
+        load_program_state()  # Forza il caricamento dello stato più recente
         if program_running and current_program_id == program_id:
             stop_program()
             
+        # Rimuovi il programma
         del programs[program_id]
+        
         if save_programs(programs):
             log_event(f"Programma {program_id} eliminato con successo", "INFO")
             return True
@@ -156,9 +275,7 @@ def delete_program(program_id):
             log_event(f"Errore durante l'eliminazione del programma {program_id}", "ERROR")
             return False
     else:
-        error_msg = f"Errore: Programma con ID {program_id} non trovato."
-        log_event(error_msg, "ERROR")
-        print(error_msg)
+        log_event(f"Errore: programma con ID {program_id} non trovato", "ERROR")
         return False
 
 def is_program_active_in_current_month(program):
@@ -171,382 +288,26 @@ def is_program_active_in_current_month(program):
     Returns:
         boolean: True se il programma è attivo nel mese corrente, False altrimenti
     """
+    if not isinstance(program, dict):
+        return False
+        
+    program_months = program.get('months', [])
+    if not program_months:
+        return False
+        
     current_month = time.localtime()[1]
+    
+    # Mappa dei nomi dei mesi italiani ai numeri di mese
     months_map = {
         "Gennaio": 1, "Febbraio": 2, "Marzo": 3, "Aprile": 4,
         "Maggio": 5, "Giugno": 6, "Luglio": 7, "Agosto": 8,
         "Settembre": 9, "Ottobre": 10, "Novembre": 11, "Dicembre": 12
     }
-    program_months = [months_map[month] for month in program.get('months', []) if month in months_map]
-    return current_month in program_months
-
-def is_program_due_today(program):
-    """
-    Verifica se il programma è previsto per oggi in base alla cadenza.
     
-    Args:
-        program: Programma da verificare
-        
-    Returns:
-        boolean: True se il programma è previsto per oggi, False altrimenti
-    """
-    current_time = time.localtime()
-    current_year = current_time[0]
-    current_month = current_time[1]
-    current_day = current_time[2]
+    # Converti i nomi dei mesi in numeri
+    program_month_numbers = [months_map.get(month, 0) for month in program_months]
     
-    # Calculate current day of year without using strftime
-    current_day_of_year = _day_of_year(current_year, current_month, current_day)
-    
-    last_run_day = -1
-
-    if 'last_run_date' in program:
-        try:
-            last_run_date = program['last_run_date']
-            date_parts = last_run_date.split('-')
-            if len(date_parts) == 3:
-                year, month, day = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
-                last_run_day = _day_of_year(year, month, day)
-            else:
-                log_event(f"Formato data non valido: {last_run_date}", "ERROR")
-        except Exception as e:
-            log_event(f"Errore nella conversione della data di esecuzione: {e}", "ERROR")
-            print(f"Errore nella conversione della data di esecuzione: {e}")
-
-    recurrence = program.get('recurrence', 'giornaliero')
-    
-    if recurrence == 'giornaliero':
-        return last_run_day != current_day_of_year
-    elif recurrence == 'giorni_alterni':
-        # Esegui ogni 2 giorni
-        return (current_day_of_year - last_run_day) >= 2
-    elif recurrence == 'personalizzata':
-        interval_days = program.get('interval_days', 1)
-        if interval_days <= 0:
-            interval_days = 1  # Fallback sicuro
-        return (current_day_of_year - last_run_day) >= interval_days
-    
-    return False
-
-async def execute_program(program, manual=False):
-    """
-    Esegue un programma di irrigazione.
-    
-    Args:
-        program: Programma da eseguire
-        manual: Flag che indica se l'esecuzione è manuale
-        
-    Returns:
-        boolean: True se l'esecuzione è completata con successo, False altrimenti
-    """
-    # Ricarica lo stato per assicurarsi di avere dati aggiornati
-    load_program_state()
-    
-    # Riferimento esplicito alle variabili globali
-    global program_running, current_program_id
-    
-    if program_running:
-        log_event(f"Impossibile eseguire il programma: un altro programma è già in esecuzione ({current_program_id})", "WARNING")
-        print(f"Un altro programma è già in esecuzione: {current_program_id}.")
-        return False
-
-    # Se è un programma automatico, prima arresta tutte le zone manuali
-    # I programmi automatici hanno priorità come richiesto
-    if not manual:
-        active_count = get_active_zones_count()
-        if active_count > 0:
-            log_event("Arresto di tutte le zone attive per dare priorità al programma automatico", "INFO")
-            try:
-                if not stop_all_zones():
-                    log_event("Errore nell'arresto di tutte le zone attive, continuazione comunque", "WARNING")
-                await asyncio.sleep(1)  # Piccolo ritardo per sicurezza
-            except Exception as e:
-                log_event(f"Errore durante l'arresto delle zone attive: {e}", "ERROR")
-                # Continuiamo comunque anche in caso di errore, ma lo registriamo
-
-    # Spegni tutte le zone prima di avviare un nuovo programma
-    try:
-        if not stop_all_zones():
-            log_event("Errore nell'arresto di tutte le zone prima dell'avvio del programma", "ERROR")
-            return False
-    except Exception as e:
-        log_event(f"Eccezione durante l'arresto di tutte le zone: {e}", "ERROR")
-        return False
-
-    # Ottieni l'ID del programma e assicurati che sia una stringa
-    program_id = str(program.get('id', '0'))
-    
-    # Imposta lo stato del programma come in esecuzione
-    program_running = True
-    current_program_id = program_id
-    
-    # Salva lo stato aggiornato su file
-    save_program_state()
-    
-    # Effettua più tentativi per assicurarsi che lo stato sia persistente
-    retry_count = 0
-    max_retries = 3
-    state_persisted = False
-    
-    while retry_count < max_retries and not state_persisted:
-        # Verifica lo stato salvato
-        current_state = program_running
-        current_id = current_program_id
-        
-        load_program_state()
-        
-        # Controlla se lo stato caricato corrisponde a quello impostato
-        if program_running == current_state and current_program_id == current_id:
-            state_persisted = True
-            break
-        
-        # Se lo stato non è corretto, lo reimpostiamo e risalviamo
-        log_event(f"Stato del programma non persistito, tentativo {retry_count + 1}/{max_retries}", "WARNING")
-        program_running = current_state
-        current_program_id = current_id
-        save_program_state()
-        
-        retry_count += 1
-        await asyncio.sleep(0.2)  # Breve pausa tra i tentativi
-    
-    # Verifica che lo stato sia stato aggiornato correttamente
-    print(f"Programma avviato: program_running={program_running}, current_program_id={current_program_id}")
-    if not state_persisted:
-        log_event("IMPORTANTE: Impossibile persistere lo stato del programma dopo multipli tentativi", "ERROR")
-    
-    # Altri log
-    program_name = program.get('name', 'Senza nome')
-    log_event(f"Avvio del programma: {program_name} (ID: {program_id})", "INFO")
-
-    # Carica le impostazioni utente per il ritardo di attivazione
-    settings = load_user_settings()
-    activation_delay = settings.get('activation_delay', 0)
-    
-    successful_execution = False
-    try:
-        for i, step in enumerate(program.get('steps', [])):
-            # Verifica periodicamente se il programma è stato interrotto
-            load_program_state()  # Ricarica lo stato prima di ogni verifica
-            
-            if not program_running:
-                log_event("Programma interrotto dall'utente.", "INFO")
-                print("Programma interrotto dall'utente.")
-                break
-
-            zone_id = step.get('zone_id')
-            duration = step.get('duration', 1)
-            
-            if zone_id is None:
-                log_event(f"Errore nel passo {i+1}: zone_id mancante", "ERROR")
-                continue
-                
-            log_event(f"Attivazione della zona {zone_id} per {duration} minuti.", "INFO")
-            print(f"Attivazione della zona {zone_id} per {duration} minuti.")
-            
-            # Avvia la zona
-            result = start_zone(zone_id, duration)
-            if not result:
-                log_event(f"Errore nell'attivazione della zona {zone_id}", "ERROR")
-                continue
-                
-            # Aspetta per la durata specificata
-            for _ in range(duration * 60):
-                # Ricarica periodicamente lo stato per verificare interruzioni
-                if _ % 10 == 0:  # Ogni 10 secondi
-                    load_program_state()
-                    
-                if not program_running:
-                    break
-                await asyncio.sleep(1)
-            
-            if not program_running:
-                break
-                
-            # Ferma la zona
-            if not stop_zone(zone_id):
-                log_event(f"Errore nell'arresto della zona {zone_id}", "WARNING")
-            log_event(f"Zona {zone_id} completata.", "INFO")
-            print(f"Zona {zone_id} completata.")
-
-            # Applica il ritardo di attivazione tra le zone
-            if activation_delay > 0 and i < len(program.get('steps', [])) - 1:
-                log_event(f"Attesa di {activation_delay} minuti prima della prossima zona.", "INFO")
-                for _ in range(activation_delay * 60):
-                    # Ricarica periodicamente lo stato per verificare interruzioni
-                    if _ % 10 == 0:  # Ogni 10 secondi
-                        load_program_state()
-                        
-                    if not program_running:
-                        break
-                    await asyncio.sleep(1)
-        
-        # Se siamo arrivati qui senza interruzioni, l'esecuzione è considerata riuscita
-        if program_running:
-            successful_execution = True
-            update_last_run_date(program_id)
-            log_event(f"Programma {program_name} completato con successo", "INFO")
-        
-        return successful_execution
-    except Exception as e:
-        log_event(f"Errore durante l'esecuzione del programma {program_name}: {e}", "ERROR")
-        print(f"Errore durante l'esecuzione del programma: {e}")
-        return False
-    finally:
-        # Assicurati che queste operazioni vengano sempre eseguite, anche in caso di errore
-        try:
-            # Aggiorna lo stato del programma
-            program_running = False
-            current_program_id = None
-            save_program_state()
-            
-            # Assicurati che tutte le zone siano disattivate, anche in caso di errore
-            stop_all_zones()
-        except Exception as final_e:
-            log_event(f"Errore finale durante la pulizia del programma: {final_e}", "ERROR")
-
-def stop_program():
-    """
-    Ferma il programma attualmente in esecuzione.
-    
-    Returns:
-        boolean: True se l'operazione è riuscita, False altrimenti
-    """
-    global program_running, current_program_id
-    
-    # Salva i valori originali per il debug e la verifica
-    original_running = program_running
-    original_id = current_program_id
-    
-    # Ricarica lo stato per assicurarsi di avere dati aggiornati
-    load_program_state()
-    
-    # Se non era in esecuzione prima e ora lo è, considera quello originale
-    # Questo è in particolare per gestire i casi di race condition nei caricamenti da file
-    if not program_running and original_running:
-        log_event(f"Stato incoerente rilevato durante l'arresto: era {original_running}, ora {program_running}", "WARNING")
-        program_running = True
-        current_program_id = original_id
-    
-    if not program_running:
-        log_event("Nessun programma in esecuzione da interrompere", "INFO")
-        return False
-        
-    log_event(f"Interruzione del programma {current_program_id} in corso.", "INFO")
-    print("Interruzione del programma in corso.")
-    
-    # Arresta prima tutte le zone e solo successivamente aggiorna lo stato
-    # Questo per evitare che il programma venga marcato come interrotto ma le zone restino attive
-    try:
-        if not stop_all_zones():
-            log_event("Errore nell'arresto delle zone durante l'interruzione del programma", "ERROR")
-            # Continuiamo comunque per aggiornare lo stato
-        else:
-            log_event("Tutte le zone sono state arrestate correttamente", "INFO")
-    except Exception as e:
-        log_event(f"Eccezione durante l'arresto delle zone: {e}", "ERROR")
-        # Continuiamo comunque per aggiornare lo stato
-    
-    # Ora aggiorna lo stato del programma
-    program_running = False
-    current_program_id = None
-    
-    # Salva lo stato su file e verifica che sia stato salvato correttamente
-    save_program_state()  
-    
-    # Effettua più tentativi per garantire che lo stato sia persistito
-    retry_count = 0
-    max_retries = 3
-    state_saved = False
-    
-    while retry_count < max_retries and not state_saved:
-        # Verifica lo stato salvato
-        temp_running = program_running
-        temp_id = current_program_id
-        
-        # Ricarica lo stato
-        load_program_state()
-        
-        # Controlla se lo stato è stato salvato correttamente
-        if program_running == temp_running and current_program_id == temp_id:
-            state_saved = True
-            break
-        
-        # Se lo stato non è stato salvato correttamente, risalva
-        log_event(f"Stato programma non persistito durante l'arresto, tentativo {retry_count + 1}/{max_retries}", "WARNING")
-        program_running = temp_running
-        current_program_id = temp_id
-        save_program_state()
-        
-        retry_count += 1
-        time.sleep(0.2)  # Breve pausa tra i tentativi
-    
-    if not state_saved:
-        log_event("IMPORTANTE: Impossibile persistere lo stato del programma dopo arresto", "ERROR")
-        
-    return True
-
-def reset_program_state():
-    """
-    Resetta lo stato del programma.
-    """
-    global program_running, current_program_id
-    
-    program_running = False
-    current_program_id = None
-    save_program_state()
-    log_event("Stato del programma resettato", "INFO")
-
-async def check_programs():
-    """
-    Controlla se ci sono programmi da eseguire automaticamente.
-    Deve essere chiamato periodicamente.
-    """
-    # Verifica le impostazioni globali
-    settings = load_user_settings()
-    automatic_programs_enabled = settings.get('automatic_programs_enabled', False)
-    
-    # Se i programmi automatici sono disabilitati globalmente, non fare nulla
-    if not automatic_programs_enabled:
-        return
-    
-    programs = load_programs()
-    if not programs:
-        return
-    
-    # Get current time in HH:MM format 
-    t = time.localtime()
-    current_time_str = f"{t[3]:02d}:{t[4]:02d}"
-
-    for program_id, program in programs.items():
-        # Verifica se questo programma specifico ha l'automazione abilitata
-        if not program.get('automatic_enabled', True):  # Default a True per compatibilità
-            continue
-            
-        activation_time = program.get('activation_time', '')
-        
-        # Verifica se il programma deve essere eseguito
-        if (current_time_str == activation_time and
-            is_program_active_in_current_month(program) and
-            is_program_due_today(program)):
-            
-            log_event(f"Avvio del programma pianificato: {program.get('name', 'Senza nome')}", "INFO")
-            print(f"Avvio del programma pianificato: {program.get('name', 'Senza nome')}")
-            
-            # Se c'è già un programma in esecuzione, non fare nulla
-            load_program_state()  # Assicurati di avere lo stato aggiornato
-            if program_running:
-                log_event("Impossibile avviare il programma: un altro programma è già in esecuzione", "WARNING")
-                continue
-                
-            # Avvia il programma con gestione degli errori migliorata
-            try:
-                # execute_program già aggiorna la data dell'ultima esecuzione in caso di successo
-                success = await execute_program(program)
-                if not success:
-                    log_event(f"Errore durante l'esecuzione del programma {program_id}", "ERROR")
-            except Exception as e:
-                log_event(f"Eccezione durante l'esecuzione del programma {program_id}: {e}", "ERROR")
-                print(f"Eccezione durante l'esecuzione del programma {program_id}: {e}")
+    return current_month in program_month_numbers
 
 def _day_of_year(year, month, day):
     """
@@ -572,18 +333,374 @@ def _day_of_year(year, month, day):
     
     return day_of_year
 
-def _get_formatted_date(t=None):
+def is_program_due_today(program):
     """
-    Custom function to format date as YYYY-MM-DD since strftime isn't available in MicroPython
+    Verifica se il programma è previsto per oggi in base alla cadenza.
     
     Args:
-        t: Time tuple (optional, uses current time if None)
+        program: Programma da verificare
         
     Returns:
-        str: Formatted date string
+        boolean: True se il programma è previsto per oggi, False altrimenti
     """
-    if t is None:
-        t = time.localtime()
+    if not isinstance(program, dict):
+        return False
+        
+    # Ottieni la data corrente
+    current_time = time.localtime()
+    current_year = current_time[0]
+    current_month = current_time[1]
+    current_day = current_time[2]
+    
+    # Calcola il giorno dell'anno corrente
+    current_day_of_year = _day_of_year(current_year, current_month, current_day)
+    
+    # Default: non eseguito mai (-1) o giorno diverso
+    last_run_day = -1
+
+    # Estrai la data dell'ultima esecuzione
+    if 'last_run_date' in program:
+        try:
+            last_run_date = program['last_run_date']
+            date_parts = last_run_date.split('-')
+            if len(date_parts) == 3:
+                year, month, day = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
+                last_run_day = _day_of_year(year, month, day)
+            else:
+                log_event(f"Formato data non valido: {last_run_date}", "ERROR")
+        except Exception as e:
+            log_event(f"Errore nella conversione della data di esecuzione: {e}", "ERROR")
+
+    # Determina la cadenza del programma
+    recurrence = program.get('recurrence', 'giornaliero')
+    
+    # Verifica basata sulla cadenza
+    if recurrence == 'giornaliero':
+        # Il programma è previsto ogni giorno, ma non più volte al giorno
+        return last_run_day != current_day_of_year
+    
+    elif recurrence == 'giorni_alterni':
+        # Il programma è previsto ogni 2 giorni
+        return (current_day_of_year - last_run_day) >= 2
+        
+    elif recurrence == 'personalizzata':
+        # Il programma è previsto ogni intervallo_giorni
+        interval_days = program.get('interval_days', 1)
+        # Assicura che l'intervallo sia almeno 1
+        if interval_days <= 0:
+            interval_days = 1
+        return (current_day_of_year - last_run_day) >= interval_days
+    
+    # Per valori di recurrence sconosciuti, non eseguire
+    return False
+
+async def execute_program(program, manual=False):
+    """
+    Esegue un programma di irrigazione con gestione robusta degli errori e
+    protezione contro stati inconsistenti.
+    
+    Args:
+        program: Programma da eseguire
+        manual: Flag che indica se l'esecuzione è manuale
+        
+    Returns:
+        boolean: True se l'esecuzione è completata con successo, False altrimenti
+    """
+    if not isinstance(program, dict):
+        log_event("Tentativo di eseguire un programma non valido", "ERROR")
+        return False
+    
+    # Ricarica lo stato per assicurarsi di avere dati aggiornati
+    load_program_state()
+    
+    # Riferimento esplicito alle variabili globali
+    global program_running, current_program_id
+    
+    if program_running:
+        log_event(f"Impossibile eseguire il programma: altro programma già in esecuzione ({current_program_id})", "WARNING")
+        return False
+
+    # Se è un programma automatico, prima arresta tutte le zone manuali
+    # I programmi automatici hanno priorità
+    if not manual:
+        active_count = get_active_zones_count()
+        if active_count > 0:
+            log_event("Arresto zone attive per dare priorità al programma automatico", "INFO")
+            try:
+                stop_all_zones()
+                await asyncio.sleep(1)  # Piccolo ritardo per sicurezza
+            except Exception as e:
+                log_event(f"Errore durante l'arresto delle zone attive: {e}", "ERROR")
+
+    # Arresta tutte le zone prima di avviare un nuovo programma
+    try:
+        if not stop_all_zones():
+            log_event("Errore durante l'arresto delle zone", "ERROR")
+            return False
+    except Exception as e:
+        log_event(f"Eccezione durante l'arresto delle zone: {e}", "ERROR")
+        return False
+
+    # Ottieni l'ID del programma
+    program_id = str(program.get('id', '0'))
+    
+    # FASE 1: Imposta lo stato del programma
+    program_running = True
+    current_program_id = program_id
+    
+    # Salva lo stato aggiornato su file
+    save_program_state()
+    
+    # FASE 2: Verifica che lo stato sia stato salvato correttamente
+    # Effettua più tentativi per garantire che lo stato sia persistente
+    state_persisted = False
+    for retry in range(3):  # Massimo 3 tentativi
+        # Verifica lo stato salvato
+        load_program_state()
+        
+        if program_running and current_program_id == program_id:
+            state_persisted = True
+            break
+        
+        # Se lo stato non è corretto, lo reimpostiamo e risalviamo
+        log_event(f"Stato programma non persistito, tentativo {retry + 1}/3", "WARNING")
+        program_running = True
+        current_program_id = program_id
+        save_program_state()
+        
+        await asyncio.sleep(0.2)  # Breve pausa tra i tentativi
+    
+    if not state_persisted:
+        log_event("IMPORTANTE: Impossibile persistere lo stato del programma", "ERROR")
+    
+    # FASE 3: Esecuzione del programma
+    program_name = program.get('name', 'Senza nome')
+    log_event(f"Avvio programma: {program_name} (ID: {program_id})", "INFO")
+
+    # Carica le impostazioni utente per il ritardo di attivazione
+    settings = load_user_settings()
+    activation_delay = settings.get('activation_delay', 0)
+    
+    # Flag per tracciare il successo dell'esecuzione
+    successful_execution = False
+    
+    try:
+        # Esegui i passaggi del programma
+        steps = program.get('steps', [])
+        
+        # Validation: verifica che gli steps siano in formato valido
+        if not isinstance(steps, list):
+            log_event(f"Formato steps non valido nel programma {program_id}", "ERROR")
+            raise ValueError("Formato steps non valido")
+        
+        for i, step in enumerate(steps):
+            # Verifica periodicamente se il programma è stato interrotto
+            load_program_state()
+            
+            if not program_running:
+                log_event("Programma interrotto dall'utente", "INFO")
+                break
+
+            # Verifica che lo step sia valido
+            if not isinstance(step, dict):
+                log_event(f"Step {i+1} non valido, ignorato", "WARNING")
+                continue
+                
+            zone_id = step.get('zone_id')
+            duration = step.get('duration', 1)
+            
+            if zone_id is None:
+                log_event(f"Errore nel passo {i+1}: zone_id mancante", "ERROR")
+                continue
+                
+            log_event(f"Attivazione zona {zone_id} per {duration} minuti", "INFO")
+            
+            # FASE 3.1: Attiva la zona
+            result = start_zone(zone_id, duration)
+            if not result:
+                log_event(f"Errore nell'attivazione della zona {zone_id}", "ERROR")
+                continue
+                
+            # FASE 3.2: Attendi per la durata specificata
+            # Suddividi l'attesa in intervalli più brevi per verificare interruzioni
+            remaining_seconds = duration * 60
+            check_interval = 10  # Verifica ogni 10 secondi
+            
+            while remaining_seconds > 0 and program_running:
+                # Determina il tempo di attesa per questo ciclo
+                wait_time = min(check_interval, remaining_seconds)
+                
+                # Attendi
+                await asyncio.sleep(wait_time)
+                remaining_seconds -= wait_time
+                
+                # Verifica lo stato del programma
+                load_program_state()
+                
+                if not program_running:
+                    log_event("Programma interrotto durante l'esecuzione di uno step", "INFO")
+                    break
+            
+            # Se il programma è stato interrotto, esci dal ciclo degli step
+            if not program_running:
+                break
+                
+            # FASE 3.3: Ferma la zona
+            if not stop_zone(zone_id):
+                log_event(f"Errore nell'arresto della zona {zone_id}", "WARNING")
+                
+            log_event(f"Zona {zone_id} completata", "INFO")
+
+            # FASE 3.4: Applica il ritardo di attivazione tra le zone
+            if activation_delay > 0 and i < len(steps) - 1:
+                log_event(f"Attesa {activation_delay} minuti prima della prossima zona", "INFO")
+                
+                # Suddividi anche il ritardo in intervalli più brevi
+                delay_seconds = activation_delay * 60
+                while delay_seconds > 0 and program_running:
+                    wait_time = min(check_interval, delay_seconds)
+                    await asyncio.sleep(wait_time)
+                    delay_seconds -= wait_time
+                    
+                    # Verifica lo stato del programma
+                    load_program_state()
+                    
+                    if not program_running:
+                        break
+        
+        # FASE 4: Verifica se l'esecuzione è stata completata con successo
+        # Se siamo arrivati qui e il programma è ancora in esecuzione, 
+        # significa che tutti gli step sono stati completati
+        if program_running:
+            successful_execution = True
+            update_last_run_date(program_id)
+            log_event(f"Programma {program_name} completato con successo", "INFO")
+        
+        return successful_execution
+        
+    except Exception as e:
+        log_event(f"Errore durante l'esecuzione del programma {program_name}: {e}", "ERROR")
+        return False
+    finally:
+        # FASE 5: Pulizia finale - questi passaggi vengono eseguiti sempre
+        try:
+            # Aggiorna lo stato del programma
+            program_running = False
+            current_program_id = None
+            save_program_state()
+            
+            # Assicurati che tutte le zone siano disattivate
+            stop_all_zones()
+        except Exception as final_e:
+            log_event(f"Errore durante la pulizia finale: {final_e}", "ERROR")
+
+def stop_program():
+    """
+    Ferma il programma attualmente in esecuzione con protezioni 
+    contro stati inconsistenti.
+    
+    Returns:
+        boolean: True se l'operazione è riuscita, False altrimenti
+    """
+    global program_running, current_program_id
+    
+    # Salva i valori originali per la verifica
+    original_running = program_running
+    original_id = current_program_id
+    
+    # Ricarica lo stato per assicurarsi di avere dati aggiornati
+    load_program_state()
+    
+    # Verifica di coerenza: se non era in esecuzione prima ma ora lo è,
+    # considera lo stato originale più attendibile
+    # Questo gestisce i casi di race condition nei caricamenti da file
+    if not program_running and original_running:
+        log_event(f"Stato incoerente durante arresto: era {original_running}, ora {program_running}", "WARNING")
+        program_running = True
+        current_program_id = original_id
+    
+    # Se non c'è nessun programma in esecuzione, non fare nulla
+    if not program_running:
+        log_event("Nessun programma in esecuzione da interrompere", "INFO")
+        return False
+        
+    # FASE 1: Log dell'operazione
+    prog_id = current_program_id or "sconosciuto"
+    log_event(f"Interruzione programma {prog_id} in corso", "INFO")
+    
+    # FASE 2: Arresta tutte le zone prima di aggiornare lo stato
+    # Questo evita che il programma venga marcato come interrotto ma le zone rimangano attive
+    try:
+        if not stop_all_zones():
+            log_event("Errore nell'arresto delle zone durante l'interruzione", "ERROR")
+        else:
+            log_event("Tutte le zone arrestate correttamente", "INFO")
+    except Exception as e:
+        log_event(f"Eccezione durante l'arresto delle zone: {e}", "ERROR")
+    
+    # FASE 3: Aggiorna lo stato del programma
+    program_running = False
+    current_program_id = None
+    
+    # FASE 4: Salva lo stato e verifica
+    save_program_state()
+    
+    # Esegui più tentativi per garantire che lo stato sia persistito
+    state_saved = False
+    for retry in range(3):
+        # Verifica lo stato salvato
+        original_running = program_running
+        original_id = current_program_id
+        
+        # Ricarica lo stato
+        load_program_state()
+        
+        # Verifica che lo stato sia stato salvato correttamente
+        if program_running == original_running and current_program_id == original_id:
+            state_saved = True
+            break
+        
+        # Se lo stato non è stato salvato correttamente, risalva
+        log_event(f"Stato non persistito durante arresto, tentativo {retry + 1}/3", "WARNING")
+        program_running = original_running
+        current_program_id = original_id
+        save_program_state()
+        
+        time.sleep(0.2)  # Breve pausa tra i tentativi
+    
+    if not state_saved:
+        log_event("IMPORTANTE: Impossibile persistere stato del programma dopo arresto", "ERROR")
+        
+    return True
+
+def reset_program_state():
+    """
+    Resetta lo stato del programma.
+    """
+    global program_running, current_program_id
+    
+    # Ferma eventuali zone attive
+    try:
+        stop_all_zones()
+    except Exception as e:
+        log_event(f"Errore durante l'arresto delle zone nel reset: {e}", "ERROR")
+    
+    # Resetta le variabili di stato
+    program_running = False
+    current_program_id = None
+    
+    # Salva lo stato su file
+    save_program_state()
+    log_event("Stato del programma resettato", "INFO")
+
+def _get_formatted_date():
+    """
+    Formatta la data corrente come YYYY-MM-DD senza dipendenze da strftime.
+    
+    Returns:
+        str: Data formattata
+    """
+    t = time.localtime()
     return f"{t[0]}-{t[1]:02d}-{t[2]:02d}"
 
 def update_last_run_date(program_id):
@@ -594,10 +711,77 @@ def update_last_run_date(program_id):
         program_id: ID del programma
     """
     program_id = str(program_id)  # Assicura che l'ID sia una stringa
-    current_date = _get_formatted_date()  # Use our custom function instead of strftime
-    programs = load_programs()
+    current_date = _get_formatted_date()
     
-    if program_id in programs:
-        programs[program_id]['last_run_date'] = current_date
-        save_programs(programs)
-        log_event(f"Data ultima esecuzione aggiornata per il programma {program_id}: {current_date}", "INFO")
+    try:
+        programs = load_programs(force_reload=True)
+        
+        if program_id in programs:
+            programs[program_id]['last_run_date'] = current_date
+            save_programs(programs)
+            log_event(f"Data ultima esecuzione aggiornata: programma {program_id}, data {current_date}", "INFO")
+        else:
+            log_event(f"Impossibile aggiornare data: programma {program_id} non trovato", "WARNING")
+    except Exception as e:
+        log_event(f"Errore nell'aggiornamento della data di esecuzione: {e}", "ERROR")
+
+async def check_programs():
+    """
+    Controlla se ci sono programmi da eseguire automaticamente.
+    Implementa controlli di sicurezza e robustezza.
+    """
+    try:
+        # Verifica le impostazioni globali
+        settings = load_user_settings()
+        automatic_programs_enabled = settings.get('automatic_programs_enabled', False)
+        
+        # Se i programmi automatici sono disabilitati globalmente, non fare nulla
+        if not automatic_programs_enabled:
+            return
+        
+        # Carica i programmi
+        programs = load_programs()
+        if not programs:
+            return
+        
+        # Ottieni l'ora corrente nel formato HH:MM
+        t = time.localtime()
+        current_time_str = f"{t[3]:02d}:{t[4]:02d}"
+
+        # Verifica ogni programma
+        for program_id, program in programs.items():
+            # Skip programmi non validi
+            if not isinstance(program, dict):
+                continue
+                
+            # Verifica se questo programma specifico ha l'automazione abilitata
+            # Default a True per compatibilità con versioni precedenti
+            if program.get('automatic_enabled', True) is not True:
+                continue
+                
+            activation_time = program.get('activation_time', '')
+            if not activation_time:
+                continue
+            
+            # Verifica se il programma deve essere eseguito
+            if (current_time_str == activation_time and
+                is_program_active_in_current_month(program) and
+                is_program_due_today(program)):
+                
+                log_event(f"Avvio programma pianificato: {program.get('name', 'Senza nome')}", "INFO")
+                
+                # Verifica se c'è già un programma in esecuzione
+                load_program_state()  # Assicurati di avere lo stato aggiornato
+                if program_running:
+                    log_event("Impossibile avviare: altro programma già in esecuzione", "WARNING")
+                    continue
+                    
+                # Avvia il programma con gestione degli errori
+                try:
+                    success = await execute_program(program)
+                    if not success:
+                        log_event(f"Errore esecuzione programma {program_id}", "ERROR")
+                except Exception as e:
+                    log_event(f"Eccezione durante esecuzione programma {program_id}: {e}", "ERROR")
+    except Exception as e:
+        log_event(f"Errore critico in check_programs: {e}", "ERROR")
