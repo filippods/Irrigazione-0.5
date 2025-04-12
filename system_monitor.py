@@ -1,27 +1,26 @@
 """
 Modulo di diagnostica per il sistema di irrigazione.
-Monitora lo stato del sistema e dei servizi, risolvendo automaticamente i problemi rilevati.
+Monitora lo stato del sistema e dei servizi, risolvendo i problemi rilevati.
 """
 import uasyncio as asyncio
 import machine
 import gc
 import network
-import socket
 import time
-import urequests
 from log_manager import log_event
 from settings_manager import load_user_settings
 from zone_manager import stop_all_zones, get_zones_status, stop_zone
 from program_state import program_running, current_program_id, load_program_state
 from wifi_manager import reset_wifi_module, initialize_network
-from web_server import app
 
 # Configurazione del modulo
-CHECK_INTERVAL = 60  # Tempo in secondi tra i controlli
-MEMORY_THRESHOLD = 20000  # Soglia di memoria libera (in bytes) prima di forzare gc
-MAX_ZONE_ACTIVATION_TIME = 180  # Tempo massimo in minuti per cui una zona può rimanere attiva
-WEB_SERVER_TIMEOUT = 5  # Timeout in secondi per il controllo del web server
-MAX_SERVER_RESTARTS = 3  # Numero massimo di riavvii del server consecutivi
+CHECK_INTERVAL = 60             # Intervallo controlli (secondi)
+MEMORY_THRESHOLD = 20000        # Soglia memoria libera (bytes)
+MAX_ZONE_ACTIVATION_TIME = 180  # Tempo massimo attivazione zona (minuti)
+WEB_SERVER_TIMEOUT = 5          # Timeout controllo web server (secondi)
+MAX_SERVER_RESTARTS = 3         # Massimo riavvii server consecutivi
+
+# Stato del sistema
 HEALTH_INDICATORS = {
     'web_server': True,
     'wifi_connection': True,
@@ -29,18 +28,19 @@ HEALTH_INDICATORS = {
     'zones': True,
     'programs': True
 }
+
 CONSECUTIVE_FAILURES = {
     'web_server': 0,
     'wifi_connection': 0
 }
 
-# Contatore per il riavvio automatico del server
+# Contatori di sistema
 server_restart_attempts = 0
 last_server_restart = 0
 
-# Metriche del sistema
+# Metriche
 system_metrics = {
-    'uptime': 0,  # Tempo di attività in secondi
+    'uptime': 0,               # Tempo attività (secondi)
     'start_time': time.time(),
     'memory_free': 0,
     'memory_allocated': 0,
@@ -53,7 +53,6 @@ system_metrics = {
 async def check_web_server():
     """
     Verifica che il web server risponda correttamente.
-    Se non risponde, tenta di riavviarlo.
     
     Returns:
         boolean: True se il server è attivo, False altrimenti
@@ -61,10 +60,8 @@ async def check_web_server():
     global server_restart_attempts, last_server_restart
     
     try:
-        # Verifica se il server risponde a una richiesta locale
-        addr_info = socket.getaddrinfo('localhost', 80)
-        addr = addr_info[0][-1]
-        
+        # Crea socket per verifica
+        import socket
         s = socket.socket()
         s.settimeout(WEB_SERVER_TIMEOUT)
         
@@ -75,94 +72,86 @@ async def check_web_server():
             s.close()
             
             if b'HTTP' in response:
+                # Server OK
                 HEALTH_INDICATORS['web_server'] = True
                 CONSECUTIVE_FAILURES['web_server'] = 0
-                server_restart_attempts = 0  # Reset del contatore se il server risponde
+                server_restart_attempts = 0
                 return True
-        except Exception as e:
-            log_event(f"Il web server non risponde: {e}", "WARNING")
-            print(f"Il web server non risponde: {e}")
+        except Exception:
+            # Server non risponde
+            pass
     except Exception as e:
-        log_event(f"Errore nel controllo del web server: {e}", "ERROR")
-        print(f"Errore nel controllo del web server: {e}")
+        log_event(f"Errore controllo web server: {e}", "ERROR")
     
-    # Il server non risponde, incrementa il contatore di fallimenti
+    # Errore o timeout
     CONSECUTIVE_FAILURES['web_server'] += 1
     HEALTH_INDICATORS['web_server'] = False
     
-    # Tenta il riavvio del server se ci sono troppi fallimenti consecutivi
+    # Riavvio server se troppi errori consecutivi
     current_time = time.time()
     if CONSECUTIVE_FAILURES['web_server'] >= 3:
-        # Previene riavvii troppo frequenti (almeno 2 minuti tra riavvii)
+        # Evita riavvii troppo frequenti
         if current_time - last_server_restart > 120 and server_restart_attempts < MAX_SERVER_RESTARTS:
-            log_event(f"Tentativo di riavvio del web server dopo {CONSECUTIVE_FAILURES['web_server']} fallimenti", "WARNING")
+            log_event(f"Riavvio web server dopo {CONSECUTIVE_FAILURES['web_server']} fallimenti", "WARNING")
             server_restart_attempts += 1
             system_metrics['server_restarts'] += 1
             last_server_restart = current_time
             
-            # Tenta di riavviare il server
+            # Riavvia server
             try:
                 await restart_web_server()
                 log_event("Web server riavviato con successo", "INFO")
                 CONSECUTIVE_FAILURES['web_server'] = 0
                 return True
             except Exception as e:
-                log_event(f"Errore nel riavvio del web server: {e}", "ERROR")
-                print(f"Errore nel riavvio del web server: {e}")
-        else:
-            # Log più dettagliato sul perché non riavviamo il server
-            if current_time - last_server_restart <= 120:
-                log_event("Riavvio del web server rinviato: ultimo riavvio troppo recente", "INFO")
-            elif server_restart_attempts >= MAX_SERVER_RESTARTS:
-                log_event(f"Raggiunto il numero massimo di riavvii del server ({MAX_SERVER_RESTARTS})", "ERROR")
-                
-                # Se abbiamo raggiunto il numero massimo di riavvii, riavvia tutto il sistema
-                if server_restart_attempts == MAX_SERVER_RESTARTS:
-                    log_event("Troppi tentativi falliti di riavvio del server, riavvio del sistema in 10 secondi", "ERROR")
-                    asyncio.create_task(_delayed_system_reset(10))
-                    server_restart_attempts += 1  # Incrementiamo per non ripetere questo log
+                log_event(f"Errore riavvio web server: {e}", "ERROR")
+        elif server_restart_attempts >= MAX_SERVER_RESTARTS:
+            # Troppi tentativi, riavvia sistema
+            if server_restart_attempts == MAX_SERVER_RESTARTS:
+                log_event("Troppi tentativi falliti, riavvio sistema tra 10s", "ERROR")
+                asyncio.create_task(_delayed_system_reset(10))
+                server_restart_attempts += 1
     
     return False
 
 async def _delayed_system_reset(seconds):
-    """
-    Riavvia il sistema dopo un ritardo specificato.
-    """
+    """Riavvia il sistema dopo un ritardo."""
     await asyncio.sleep(seconds)
     machine.reset()
 
 async def restart_web_server():
-    """
-    Riavvia il web server.
-    """
+    """Riavvia il web server."""
+    # Importa qui per evitare import circolari
+    from web_server import app
+    
     try:
-        # Forza una garbage collection prima di riavviare
+        # Libera memoria
         gc.collect()
         
-        # Ferma il server corrente se possibile
+        # Ferma server attuale
         if hasattr(app, 'server') and app.server:
             try:
                 app.server.close()
                 await asyncio.sleep(1)
             except Exception as e:
-                log_event(f"Errore nella chiusura del server: {e}", "WARNING")
+                log_event(f"Errore chiusura server: {e}", "WARNING")
         
-        # Avvia un nuovo server
+        # Avvia nuovo server
         asyncio.create_task(app.start_server(host='0.0.0.0', port=80))
         
-        # Attendi un po' per permettere l'avvio del server
+        # Attesa per avvio
         await asyncio.sleep(2)
         log_event("Server web riavviato", "INFO")
     except Exception as e:
-        log_event(f"Errore nel riavvio del server web: {e}", "ERROR")
+        log_event(f"Errore riavvio server web: {e}", "ERROR")
         raise
 
 async def check_wifi_connection():
     """
-    Verifica lo stato della connessione WiFi e la riavvia se necessario.
+    Verifica connessione WiFi.
     
     Returns:
-        boolean: True se la connessione è OK, False altrimenti
+        boolean: True se connessione OK, False altrimenti
     """
     try:
         settings = load_user_settings()
@@ -170,17 +159,16 @@ async def check_wifi_connection():
         wlan_sta = network.WLAN(network.STA_IF)
         wlan_ap = network.WLAN(network.AP_IF)
         
-        # Verifica la modalità corretta in base alle impostazioni
         if client_enabled:
-            # Se il client è abilitato, dovrebbe essere connesso
+            # Verifica client attivo
             if not wlan_sta.isconnected():
-                log_event("Connessione WiFi client persa, tentativo di ripristino", "WARNING")
+                log_event("Connessione WiFi client persa", "WARNING")
                 CONSECUTIVE_FAILURES['wifi_connection'] += 1
                 HEALTH_INDICATORS['wifi_connection'] = False
                 
-                # Dopo 3 fallimenti, tenta un reset più drastico
+                # Reset dopo troppi errori
                 if CONSECUTIVE_FAILURES['wifi_connection'] >= 3:
-                    log_event("Riavvio completo del modulo WiFi", "WARNING")
+                    log_event("Riavvio completo modulo WiFi", "WARNING")
                     system_metrics['wifi_disconnects'] += 1
                     reset_wifi_module()
                     await asyncio.sleep(1)
@@ -193,12 +181,12 @@ async def check_wifi_connection():
                 CONSECUTIVE_FAILURES['wifi_connection'] = 0
                 return True
         else:
-            # Se il client è disabilitato, l'AP dovrebbe essere attivo
+            # Client disabilitato, verifica AP
             if not wlan_ap.active():
-                log_event("Access Point non attivo, tentativo di ripristino", "WARNING")
+                log_event("Access Point non attivo", "WARNING")
                 HEALTH_INDICATORS['wifi_connection'] = False
                 
-                # Riavvia l'access point
+                # Riavvia AP
                 from wifi_manager import start_access_point
                 ap_ssid = settings.get('ap', {}).get('ssid', 'IrrigationSystem')
                 ap_password = settings.get('ap', {}).get('password', '12345678')
@@ -210,40 +198,39 @@ async def check_wifi_connection():
                 return True
     
     except Exception as e:
-        log_event(f"Errore nel controllo della connessione WiFi: {e}", "ERROR")
-        print(f"Errore nel controllo della connessione WiFi: {e}")
+        log_event(f"Errore controllo connessione WiFi: {e}", "ERROR")
         HEALTH_INDICATORS['wifi_connection'] = False
         return False
 
 async def check_memory_usage():
     """
-    Controlla l'utilizzo della memoria e forza la garbage collection se necessario.
+    Controlla memoria disponibile.
     
     Returns:
-        boolean: True se la memoria è OK, False se c'è poca memoria disponibile
+        boolean: True se memoria OK, False se poca memoria
     """
     try:
-        # Raccogli i dati sulla memoria
+        # Raccogli dati memoria
         free_mem = gc.mem_free()
         allocated_mem = gc.mem_alloc()
         total_mem = free_mem + allocated_mem
         percent_free = (free_mem / total_mem) * 100
         
-        # Aggiorna le metriche
+        # Aggiorna metriche
         system_metrics['memory_free'] = free_mem
         system_metrics['memory_allocated'] = allocated_mem
         
-        # Controlla se c'è poca memoria disponibile
+        # Verifica memoria bassa
         if free_mem < MEMORY_THRESHOLD or percent_free < 10:
-            log_event(f"Memoria in esaurimento: {free_mem} bytes liberi ({percent_free:.1f}%), forzatura garbage collection", "WARNING")
+            log_event(f"Memoria bassa: {free_mem} bytes ({percent_free:.1f}%), GC forzato", "WARNING")
             gc.collect()
             system_metrics['gc_runs'] += 1
             
-            # Verifica di nuovo dopo la garbage collection
+            # Verifica dopo GC
             new_free_mem = gc.mem_free()
             new_percent_free = (new_free_mem / total_mem) * 100
             
-            log_event(f"Dopo garbage collection: {new_free_mem} bytes liberi ({new_percent_free:.1f}%)", "INFO")
+            log_event(f"Post GC: {new_free_mem} bytes ({new_percent_free:.1f}%)", "INFO")
             
             if new_free_mem < MEMORY_THRESHOLD:
                 HEALTH_INDICATORS['memory'] = False
@@ -253,48 +240,46 @@ async def check_memory_usage():
         return True
     
     except Exception as e:
-        log_event(f"Errore nel controllo della memoria: {e}", "ERROR")
-        print(f"Errore nel controllo della memoria: {e}")
+        log_event(f"Errore controllo memoria: {e}", "ERROR")
         HEALTH_INDICATORS['memory'] = False
         return False
 
 async def check_zones_state():
     """
-    Verifica che tutte le zone siano in uno stato coerente.
-    Disattiva le zone che sono rimaste attive per troppo tempo.
+    Verifica stato zone e disattiva quelle attive da troppo tempo.
     
     Returns:
-        boolean: True se le zone sono OK, False altrimenti
+        boolean: True se zone OK, False altrimenti
     """
     try:
         zones_status = get_zones_status()
         current_time = time.time()
         
-        # Se non ci sono zone attive, tutto è OK
+        # Verifica ogni zona attiva
         active_zones_found = False
         for zone in zones_status:
             if zone['active']:
                 active_zones_found = True
                 
-                # Se la zona è attiva, controlla quanto tempo è rimasta attiva
+                # Controlla tempo attivazione
                 remaining_time = zone.get('remaining_time', 0)
                 
                 if remaining_time == 0:
-                    # La zona dovrebbe già essere spenta, ma è ancora attiva
-                    log_event(f"Zona {zone['id']} bloccata in stato attivo, disattivazione forzata", "WARNING")
+                    # Zona bloccata
+                    log_event(f"Zona {zone['id']} bloccata, disattivazione forzata", "WARNING")
                     stop_zone(zone['id'])
                     system_metrics['zone_corrections'] += 1
                 elif remaining_time > MAX_ZONE_ACTIVATION_TIME * 60:
-                    # La zona è attiva da troppo tempo
-                    log_event(f"Zona {zone['id']} attiva da troppo tempo, disattivazione forzata", "WARNING")
+                    # Zona attiva da troppo tempo
+                    log_event(f"Zona {zone['id']} attiva da troppo tempo, disattivazione", "WARNING")
                     stop_zone(zone['id'])
                     system_metrics['zone_corrections'] += 1
         
-        # Se c'è un programma in esecuzione, verifica che le zone siano coerenti
+        # Verifica coerenza programma
         load_program_state()
         if program_running:
             if not active_zones_found:
-                log_event("Incongruenza: programma in esecuzione ma nessuna zona attiva, ripristino", "WARNING")
+                log_event("Programma in esecuzione ma nessuna zona attiva", "WARNING")
                 from program_manager import stop_program
                 stop_program()
                 system_metrics['zone_corrections'] += 1
@@ -305,31 +290,30 @@ async def check_zones_state():
         return True
     
     except Exception as e:
-        log_event(f"Errore nel controllo dello stato delle zone: {e}", "ERROR")
-        print(f"Errore nel controllo dello stato delle zone: {e}")
+        log_event(f"Errore controllo stato zone: {e}", "ERROR")
         HEALTH_INDICATORS['zones'] = False
         return False
 
 async def check_programs_state():
     """
-    Verifica che i programmi siano in uno stato coerente.
+    Verifica coerenza programmi.
     
     Returns:
-        boolean: True se i programmi sono OK, False altrimenti
+        boolean: True se programmi OK, False altrimenti
     """
     try:
         from program_state import program_running, current_program_id
         from program_manager import load_programs
         
-        # Ricarica lo stato del programma per essere sicuri
+        # Ricarica stato per dati aggiornati
         load_program_state()
         
-        # Se c'è un programma in esecuzione, verifica che esista
+        # Verifica esistenza programma in esecuzione
         if program_running and current_program_id:
             programs = load_programs()
             
             if current_program_id not in programs:
-                log_event(f"Programma {current_program_id} in esecuzione non trovato, arresto forzato", "WARNING")
+                log_event(f"Programma {current_program_id} in esecuzione non trovato", "WARNING")
                 from program_manager import stop_program
                 stop_program()
                 HEALTH_INDICATORS['programs'] = False
@@ -339,17 +323,16 @@ async def check_programs_state():
         return True
     
     except Exception as e:
-        log_event(f"Errore nel controllo dello stato dei programmi: {e}", "ERROR")
-        print(f"Errore nel controllo dello stato dei programmi: {e}")
+        log_event(f"Errore controllo stato programmi: {e}", "ERROR")
         HEALTH_INDICATORS['programs'] = False
         return False
 
 async def check_system_health():
     """
-    Controlla la salute complessiva del sistema.
+    Controllo completo stato sistema.
     """
     try:
-        # Aggiorna il tempo di attività
+        # Aggiorna uptime
         system_metrics['uptime'] = time.time() - system_metrics['start_time']
         
         # Esegui tutti i controlli
@@ -359,11 +342,11 @@ async def check_system_health():
         zones_ok = await check_zones_state()
         programs_ok = await check_programs_state()
         
-        # Decidi se registrare un log sullo stato del sistema
+        # Logga stato completo solo periodicamente o se ci sono problemi
         all_ok = web_server_ok and wifi_ok and memory_ok and zones_ok and programs_ok
         
         if all_ok:
-            # Tutti i controlli sono OK, registra ogni 10 esecuzioni (circa ogni 10 minuti)
+            # Log stato OK ogni 10 iterazioni (circa 10 minuti)
             if int(system_metrics['uptime']) % (CHECK_INTERVAL * 10) < CHECK_INTERVAL:
                 free_mem = gc.mem_free()
                 allocated_mem = gc.mem_alloc()
@@ -371,10 +354,10 @@ async def check_system_health():
                 percent_free = (free_mem / total_mem) * 100
                 
                 log_event(f"Sistema in salute. Uptime: {int(system_metrics['uptime']//3600)}h {int((system_metrics['uptime']%3600)//60)}m. "
-                         f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
+                         f"Memoria: {free_mem} bytes ({percent_free:.1f}%)", "INFO")
         else:
-            # Qualche controllo è fallito, registra ogni esecuzione
-            log_event(f"Problemi rilevati nel sistema. Stato: "
+            # Log ogni iterazione in caso di problemi
+            log_event(f"Problemi rilevati. Stato: "
                      f"WebServer={HEALTH_INDICATORS['web_server']}, "
                      f"WiFi={HEALTH_INDICATORS['wifi_connection']}, "
                      f"Memoria={HEALTH_INDICATORS['memory']}, "
@@ -382,81 +365,33 @@ async def check_system_health():
                      f"Programmi={HEALTH_INDICATORS['programs']}", "WARNING")
     
     except Exception as e:
-        log_event(f"Errore nel controllo della salute del sistema: {e}", "ERROR")
-        print(f"Errore nel controllo della salute del sistema: {e}")
+        log_event(f"Errore controllo salute sistema: {e}", "ERROR")
 
 async def diagnostic_loop():
     """
-    Loop principale di diagnostica che viene eseguito periodicamente.
+    Loop principale diagnostica.
     """
-    log_event("Sistema di diagnostica avviato", "INFO")
-    print("Sistema di diagnostica avviato.")
+    log_event("Sistema diagnostica avviato", "INFO")
     
-    # Attendi un po' prima del primo controllo per permettere l'avvio completo del sistema
+    # Attendi prima del primo controllo
     await asyncio.sleep(30)
     
     while True:
         try:
             await check_system_health()
         except Exception as e:
-            log_event(f"Errore grave nel loop di diagnostica: {e}", "ERROR")
-            print(f"Errore grave nel loop di diagnostica: {e}")
+            log_event(f"Errore grave diagnsotica: {e}", "ERROR")
         
-        # Attendi fino al prossimo controllo - usiamo un approccio più reattivo
-        # Controlla più frequentemente se ci sono problemi noti
+        # Controllo più frequente se ci sono problemi noti
         if any(not status for status in HEALTH_INDICATORS.values()):
-            await asyncio.sleep(CHECK_INTERVAL // 2)  # Controlla più spesso se ci sono problemi
+            await asyncio.sleep(CHECK_INTERVAL // 2)
         else:
             await asyncio.sleep(CHECK_INTERVAL)
 
 async def start_diagnostics():
     """
-    Avvia il sistema di diagnostica.
+    Avvia sistema diagnostica.
     """
-    # Crea e avvia il task di diagnostica
     diagnostic_task = asyncio.create_task(diagnostic_loop())
-    log_event("Sistema di diagnostica inizializzato", "INFO")
-    print("Sistema di diagnostica inizializzato.")
+    log_event("Sistema diagnostica inizializzato", "INFO")
     return diagnostic_task
-    
-# Modify the watchdog_loop function in main.py to run more frequently
-async def watchdog_loop():
-    """
-    Task asincrono che monitora lo stato del sistema e registra
-    periodicamente le informazioni di memoria disponibile.
-    """
-    while True:
-        try:
-            free_mem = gc.mem_free()
-            allocated_mem = gc.mem_alloc()
-            total_mem = free_mem + allocated_mem
-            percent_free = (free_mem / total_mem) * 100
-            
-            log_event(f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
-            
-            # Forza la garbage collection più frequentemente
-            gc.collect()
-            
-            # Se memoria bassa, forza una garbage collection aggressiva
-            if percent_free < 20:
-                log_event("Memoria bassa rilevata, esecuzione pulizia aggressiva", "WARNING")
-                # Esegui più volte la garbage collection
-                for _ in range(3):
-                    gc.collect()
-                # Riavvia il server web se la memoria è estremamente bassa
-                if percent_free < 10:
-                    log_event("Memoria critica, riavvio del server web", "WARNING")
-                    try:
-                        from web_server import app
-                        if hasattr(app, 'server') and app.server:
-                            app.server.close()
-                            await asyncio.sleep(1)
-                            asyncio.create_task(app.start_server(host='0.0.0.0', port=80))
-                    except Exception as e:
-                        log_event(f"Errore nel riavvio del server web: {e}", "ERROR")
-            
-            # Riduci l'intervallo da 1 ora a 10 minuti per verificare più spesso la memoria
-            await asyncio.sleep(600)
-        except Exception as e:
-            log_event(f"Errore nel watchdog: {e}", "ERROR")
-            await asyncio.sleep(60)  # Ridotto da 600 a 60 secondi in caso di errore
