@@ -162,8 +162,13 @@ def api_handler(f):
                 'error': error_message
             }, 200)  # Usa 200 anche per errori per compatibilità client
     
-    # Preserva metadati funzione originale
-    wrapper.__name__ = getattr(f, '__name__', 'api_handler')
+    # Preserva metadati funzione originale in modo sicuro
+    try:
+        wrapper.__name__ = getattr(f, '__name__', 'api_handler')
+    except (AttributeError, TypeError):
+        # Se c'è un errore nell'assegnazione, ignora silenziosamente
+        pass
+        
     return wrapper
 
 def load_settings_cached():

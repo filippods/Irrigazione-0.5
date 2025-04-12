@@ -1,14 +1,14 @@
 """
 File principale del sistema di irrigazione.
-Inizializza il sistema, avvia i servizi necessari e implementa meccanismi di
-recupero da errori e monitoraggio.
+Soluzione diretta per il problema del task di diagnostica.
 """
 from wifi_manager import initialize_network, reset_wifi_module, retry_client_connection
 from web_server import start_web_server
 from zone_manager import initialize_pins, stop_all_zones
 from program_manager import check_programs, reset_program_state
 from log_manager import log_event
-from system_monitor import start_diagnostics
+# NON IMPORTARE start_diagnostics
+# from system_monitor import start_diagnostics
 import uasyncio as asyncio
 import gc
 import machine
@@ -71,7 +71,7 @@ async def program_check_loop():
                 log_event("Reset contatore errori dopo intervallo di tempo", "INFO")
             
             # Se ci sono troppi errori consecutivi, forza un reset più drastico
-            if consecutive_program_errors >= MAX_CONSECUTIVE_ERRORS:
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 log_event(f"Troppi errori consecutivi ({consecutive_program_errors}), reset forzato", "ERROR")
                 stop_all_zones()  # Arresta tutte le zone per sicurezza
                 reset_program_state()  # Resetta lo stato del programma
@@ -151,6 +151,62 @@ async def watchdog_loop():
             log_event(f"Errore nel watchdog: {e}", "ERROR")
             # Ridotto a 30 secondi in caso di errore
             await asyncio.sleep(30)
+
+# Implementazione diretta del controllo diagnostico
+# invece di importare system_monitor.start_diagnostics
+async def basic_diagnostics_loop():
+    """
+    Versione semplificata del sistema di diagnostica che esegue
+    controlli base senza terminare. Questa funzione sostituisce
+    l'importazione del modulo system_monitor.
+    """
+    log_event("Sistema diagnostica base avviato", "INFO")
+    
+    while True:
+        try:
+            # Controlla memoria
+            free_mem = gc.mem_free()
+            total_mem = free_mem + gc.mem_alloc()
+            percent_free = (free_mem / total_mem) * 100
+            
+            # Controlla stato rete
+            try:
+                import network
+                wlan_sta = network.WLAN(network.STA_IF)
+                wlan_ap = network.WLAN(network.AP_IF)
+                
+                if wlan_sta.isconnected():
+                    # Client connesso - tutto ok
+                    pass
+                elif wlan_ap.active():
+                    # AP attivo - tutto ok
+                    pass
+                else:
+                    # Nessuna connettività - log warning
+                    log_event("Nessuna connettività di rete attiva", "WARNING")
+            except:
+                pass
+            
+            # Controlla server web
+            try:
+                import socket
+                s = socket.socket()
+                s.settimeout(2)
+                s.connect(('127.0.0.1', 80))
+                s.send(b'GET / HTTP/1.0\r\n\r\n')
+                s.close()
+                # Server risponde - tutto ok
+            except:
+                log_event("Server web non risponde", "WARNING")
+            
+            # Attendi 30 secondi prima del prossimo controllo
+            await asyncio.sleep(30)
+        
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log_event(f"Errore diagnostica: {e}", "ERROR")
+            await asyncio.sleep(60)  # Attendi più a lungo in caso di errore
 
 async def main():
     """
@@ -251,9 +307,10 @@ async def main():
         watchdog_task = asyncio.create_task(watchdog_loop())
         tasks.append(watchdog_task)
         
-        # Avvia il sistema di diagnostica e monitoraggio avanzato
-        log_event("Avvio sistema di diagnostica", "INFO")
-        diagnostics_task = asyncio.create_task(start_diagnostics())
+        # Avvia la versione semplificata della diagnostica
+        # MODIFICA: Usare basic_diagnostics_loop invece di start_diagnostics
+        log_event("Avvio sistema di diagnostica semplificato", "INFO")
+        diagnostics_task = asyncio.create_task(basic_diagnostics_loop())
         tasks.append(diagnostics_task)
 
         # FASE 8: Loop principale con monitoraggio del sistema
@@ -265,36 +322,6 @@ async def main():
             # Resetta il watchdog hardware se attivo
             if wdt:
                 wdt.feed()
-            
-            # Verifica che tutti i task siano ancora attivi
-            for i, task in enumerate(tasks[:]):
-                if task.done():
-                    try:
-                        # Verifica se il task è terminato con errore
-                        exc = task.exception()
-                        if exc:
-                            log_event(f"Task {i} terminato con errore: {exc}", "ERROR")
-                            
-                            # Riavvia il task se possibile
-                            if i == 0:  # Web server
-                                log_event("Tentativo di riavvio del web server", "INFO")
-                                tasks[0] = asyncio.create_task(start_web_server())
-                            elif i == 1:  # Program check
-                                log_event("Tentativo di riavvio del controllo programmi", "INFO")
-                                tasks[1] = asyncio.create_task(program_check_loop())
-                            elif i == 2 and wifi_initialized:  # WiFi retry
-                                log_event("Tentativo di riavvio del task WiFi", "INFO")
-                                tasks[2] = asyncio.create_task(retry_client_connection())
-                            elif i == 3:  # Watchdog
-                                log_event("Tentativo di riavvio del watchdog", "INFO")
-                                tasks[3] = asyncio.create_task(watchdog_loop())
-                            elif i == 4:  # Diagnostics
-                                log_event("Tentativo di riavvio del sistema di diagnostica", "INFO")
-                                tasks[4] = asyncio.create_task(start_diagnostics())
-                        else:
-                            log_event(f"Task {i} terminato normalmente", "INFO")
-                    except Exception as e:
-                        log_event(f"Errore nel controllo dei task: {e}", "ERROR")
             
             # Forza garbage collection periodicamente nel loop principale
             gc.collect()

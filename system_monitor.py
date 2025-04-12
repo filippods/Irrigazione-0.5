@@ -50,6 +50,14 @@ system_metrics = {
     'zone_corrections': 0
 }
 
+# Monitoraggio salute server
+server_health = {
+    'start_time': time.time(),
+    'timeout_counter': 0,
+    'last_restart': 0,
+    'memory_warning': False
+}
+
 async def check_web_server():
     """
     Verifica che il web server risponda correttamente.
@@ -109,7 +117,7 @@ async def check_web_server():
             # Troppi tentativi, riavvia sistema
             if server_restart_attempts == MAX_SERVER_RESTARTS:
                 log_event("Troppi tentativi falliti, riavvio sistema tra 10s", "ERROR")
-                asyncio.create_task(_delayed_system_reset(10))
+                await _delayed_system_reset(10)
                 server_restart_attempts += 1
     
     return False
@@ -354,7 +362,7 @@ async def check_system_health():
                 percent_free = (free_mem / total_mem) * 100
                 
                 log_event(f"Sistema in salute. Uptime: {int(system_metrics['uptime']//3600)}h {int((system_metrics['uptime']%3600)//60)}m. "
-                         f"Memoria: {free_mem} bytes ({percent_free:.1f}%)", "INFO")
+                         f"Memoria: {free_mem} bytes liberi ({percent_free:.1f}%)", "INFO")
         else:
             # Log ogni iterazione in caso di problemi
             log_event(f"Problemi rilevati. Stato: "
@@ -369,7 +377,7 @@ async def check_system_health():
 
 async def diagnostic_loop():
     """
-    Loop principale diagnostica.
+    Loop principale diagnostica. Questo è il task che deve rimanere attivo.
     """
     log_event("Sistema diagnostica avviato", "INFO")
     
@@ -380,7 +388,7 @@ async def diagnostic_loop():
         try:
             await check_system_health()
         except Exception as e:
-            log_event(f"Errore grave diagnsotica: {e}", "ERROR")
+            log_event(f"Errore grave diagnostica: {e}", "ERROR")
         
         # Controllo più frequente se ci sono problemi noti
         if any(not status for status in HEALTH_INDICATORS.values()):
@@ -391,7 +399,8 @@ async def diagnostic_loop():
 async def start_diagnostics():
     """
     Avvia sistema diagnostica.
+    Questo è il corretto punto di ingresso che DEVE ritornare il task di diagnostica
+    invece di avviarlo direttamente, per evitare che il supervised_task lo riavvii.
     """
-    diagnostic_task = asyncio.create_task(diagnostic_loop())
     log_event("Sistema diagnostica inizializzato", "INFO")
-    return diagnostic_task
+    return diagnostic_loop()  # Ritorna la coroutine, non creare il task
